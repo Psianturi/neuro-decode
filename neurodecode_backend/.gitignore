@@ -1,0 +1,18 @@
+.env
+.env.*
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+.idea/
+.vscode/
+
+# Model artifacts (keep out of git; place locally/deploy separately)
+models/*.keras
+models/*.h5
+models/*.tflite
