@@ -277,6 +277,21 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     }
   }
 
+  void _toggleMic() async {
+    if (!_isConnected) return;
+    if (_isMicActive) {
+      await _stopMicStream();
+    } else {
+      //stop Gemini audio if it's speaking when user starts talking
+      if (_state == AgentState.speaking) {
+        _currentTurnAudioBuffer.clear();
+        await _player.stop();
+        _logDebug('barge_in', 'user interrupted Gemini, audio stopped');
+      }
+      await _startMicStream();
+    }
+  }
+
   Future<void> _startMicStream() async {
     if (_isMicActive || !_isConnected) return;
     if (!await _recorder.hasPermission()) return;
@@ -294,7 +309,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       });
     }
     _setStateLabel(AgentState.listening);
-    _logDebug('mic_event', 'started');
+    _logDebug('mic_event', 'toggle ON — streaming started');
 
     _micStreamSub = stream.listen((chunk) {
       final currentChannel = _channel;
@@ -306,17 +321,27 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         'mime_type': 'audio/pcm;rate=16000',
       };
       currentChannel.sink.add(jsonEncode(payload));
-      _logDebug('mic_event', 'streaming bytes=${chunk.length}');
     });
   }
 
-  void _stopMicStream() {
+  /// Synchronous cleanup variant used by _handleSocketClosed / dispose.
+  void _stopMicStreamSync() {
     if (!_isMicActive) return;
-
     _micStreamSub?.cancel();
     _micStreamSub = null;
     _recorder.stop();
-    _logDebug('mic_event', 'stopped');
+    if (mounted) {
+      setState(() { _isMicActive = false; });
+    }
+  }
+
+  Future<void> _stopMicStream() async {
+    if (!_isMicActive) return;
+
+    await _micStreamSub?.cancel();
+    _micStreamSub = null;
+    await _recorder.stop();
+    _logDebug('mic_event', 'toggle OFF — streaming stopped');
 
     if (_isConnected && _channel != null) {
       _channel!.sink.add(
@@ -452,7 +477,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _handleSocketClosed({required bool manual}) {
-    _stopMicStream();
+    _stopMicStreamSync();
     _wsSub?.cancel();
     _wsSub = null;
     _channel?.sink.close();
@@ -638,33 +663,42 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
             child: Column(
               children: [
                 GestureDetector(
-                  onLongPress: _startMicStream,
-                  onLongPressUp: _stopMicStream,
+                  onTap: _toggleMic,
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
+                    duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: _state == AgentState.listening
+                      color: _isMicActive
                           ? Colors.redAccent
                           : NeuroColors.primary,
                       shape: BoxShape.circle,
-                      boxShadow: _state == AgentState.listening
+                      boxShadow: _isMicActive
                           ? [
                               const BoxShadow(
                                 color: Colors.red,
-                                blurRadius: 15,
+                                blurRadius: 20,
                                 spreadRadius: 5,
                               ),
                             ]
                           : [],
                     ),
                     child: Icon(
-                      _state == AgentState.thinking
-                          ? Icons.hourglass_empty
-                          : Icons.mic,
+                      _isMicActive
+                          ? Icons.stop
+                          : (_state == AgentState.thinking
+                              ? Icons.hourglass_empty
+                              : Icons.mic),
                       size: 40,
                       color: Colors.white,
                     ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _isMicActive ? 'Tap to stop' : 'Tap to speak',
+                  style: const TextStyle(
+                    color: NeuroColors.textSecondary,
+                    fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 12),

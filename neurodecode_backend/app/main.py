@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -16,6 +17,8 @@ from app.settings import get_settings
 load_dotenv()
 
 app = FastAPI(title="NeuroDecode AI Backend")
+
+IDLE_TIMEOUT_SECONDS = 45
 
 
 SYSTEM_INSTRUCTION = (
@@ -51,10 +54,26 @@ async def ws_live(websocket: WebSocket) -> None:
         session_cm = MockLiveSession()
 
     async with session_cm as session:
+        last_activity = time.monotonic()
+
+        async def idle_monitor() -> None:
+            """Close the WebSocket if no client activity for IDLE_TIMEOUT_SECONDS."""
+            nonlocal last_activity
+            while True:
+                await asyncio.sleep(5)
+                if time.monotonic() - last_activity > IDLE_TIMEOUT_SECONDS:
+                    print(f"[idle_monitor] No activity for {IDLE_TIMEOUT_SECONDS}s — closing session")
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "message": "Session closed: idle timeout"})
+                    )
+                    await websocket.close(code=1000, reason="Idle timeout")
+                    return
 
         async def pump_client_to_gemini() -> None:
+            nonlocal last_activity
             while True:
                 raw = await websocket.receive_text()
+                last_activity = time.monotonic()
                 msg = json.loads(raw)
                 msg_type = ensure_type(msg)
 
@@ -106,9 +125,10 @@ async def ws_live(websocket: WebSocket) -> None:
         try:
             client_task = asyncio.create_task(pump_client_to_gemini())
             gemini_task = asyncio.create_task(pump_gemini_to_client())
+            idle_task = asyncio.create_task(idle_monitor())
 
             done, pending = await asyncio.wait(
-                {client_task, gemini_task},
+                {client_task, gemini_task, idle_task},
                 return_when=asyncio.FIRST_EXCEPTION,
             )
 
