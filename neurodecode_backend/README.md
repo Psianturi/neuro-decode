@@ -128,4 +128,4 @@ If your `gcloud` version doesn’t support `--set-secrets`, set the env var via 
 Use:
 
 - `wss://YOUR_CLOUD_RUN_URL/ws/live` for WebSocket
-- `https://YOUR_CLOUD_RUN_URL/healthz` for health check
+- `https://YOUR_CLOUD_RUN_URL/health` for health check
