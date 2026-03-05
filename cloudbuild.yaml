@@ -34,3 +34,6 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/neurodecode-backend'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
