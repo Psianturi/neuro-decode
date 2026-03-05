@@ -1,0 +1,36 @@
+steps:
+  # 1. Build container image from neurodecode_backend subdirectory
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/neurodecode-backend'
+      - './neurodecode_backend'
+
+  # 2. Push image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/neurodecode-backend'
+
+  # 3. Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'neurodecode-backend'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/neurodecode-backend'
+      - '--region'
+      - 'asia-southeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--timeout'
+      - '3600'
+      - '--concurrency'
+      - '1'
+
+images:
+  - 'gcr.io/$PROJECT_ID/neurodecode-backend'
