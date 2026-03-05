@@ -30,6 +30,7 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+@app.get("/health")
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
