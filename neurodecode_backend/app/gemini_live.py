@@ -90,6 +90,14 @@ class GeminiLiveSession:
             turn_complete=end_of_turn,
         )
 
+    async def send_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> None:
+        """Send a camera frame to the Live session as visual context."""
+        if self._session is None:
+            raise RuntimeError("Live session not started")
+
+        blob = types.Blob(data=image_bytes, mime_type=mime_type)
+        await self._session.send_realtime_input(media=blob)
+
     async def send_observer_note(self, text: str) -> None:
         if self._session is None:
             raise RuntimeError("Live session not started")

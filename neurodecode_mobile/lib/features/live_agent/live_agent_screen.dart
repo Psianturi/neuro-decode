@@ -41,6 +41,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isMicActive = false;
   final AudioPlayer _player = AudioPlayer();
   CameraController? _cameraController;
+  Timer? _visionTimer;
+  bool _isCapturingFrame = false;
 
   final BytesBuilder _currentTurnAudioBuffer = BytesBuilder(copy: false);
   bool _seenTranscriptOutInCurrentTurn = false;
@@ -86,6 +88,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _cameraController = controller;
       });
       _logDebug('camera_event', 'preview initialized');
+      _startVisionLoop();
     } catch (e) {
       _logDebug('camera_event', 'failed: $e');
     }
@@ -131,6 +134,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _disconnect() {
+    _stopVisionLoop();
     _handleSocketClosed(manual: true);
   }
 
@@ -289,6 +293,46 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _logDebug('barge_in', 'user interrupted Gemini, audio stopped');
       }
       await _startMicStream();
+    }
+  }
+
+  // ── Vision Loop: periodic camera frame capture ──
+
+  void _startVisionLoop() {
+    if (_visionTimer != null) return;
+    _visionTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _captureAndSendFrame();
+    });
+    _logDebug('vision', 'vision loop started (every 3s)');
+  }
+
+  void _stopVisionLoop() {
+    _visionTimer?.cancel();
+    _visionTimer = null;
+  }
+
+  Future<void> _captureAndSendFrame() async {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (!_isConnected || _channel == null) return;
+    if (_isCapturingFrame) return;
+
+    _isCapturingFrame = true;
+    try {
+      final xFile = await controller.takePicture();
+      final bytes = await xFile.readAsBytes();
+      final b64 = base64Encode(bytes);
+
+      _channel!.sink.add(jsonEncode({
+        'type': 'image',
+        'data_b64': b64,
+        'mime_type': 'image/jpeg',
+      }));
+      _logDebug('vision', 'frame sent (${bytes.length} bytes)');
+    } catch (e) {
+      _logDebug('vision', 'capture failed: $e');
+    } finally {
+      _isCapturingFrame = false;
     }
   }
 
@@ -477,6 +521,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _handleSocketClosed({required bool manual}) {
+    _stopVisionLoop();
     _stopMicStreamSync();
     _wsSub?.cancel();
     _wsSub = null;

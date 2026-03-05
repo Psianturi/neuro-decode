@@ -90,6 +90,13 @@ async def ws_live(websocket: WebSocket) -> None:
                     if not isinstance(text, str):
                         raise ValueError("text.text must be a string")
                     await session.send_text(text, bool(end_of_turn))
+                elif msg_type == "image":
+                    data_b64 = msg.get("data_b64")
+                    mime_type = msg.get("mime_type") or "image/jpeg"
+                    if not isinstance(data_b64, str):
+                        raise ValueError("image.data_b64 must be a string")
+                    image_bytes = b64_decode(data_b64)
+                    await session.send_image(image_bytes, mime_type)
                 elif msg_type == "observer_note":
                     text = msg.get("text")
                     if not isinstance(text, str):
