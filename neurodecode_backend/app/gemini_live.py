@@ -102,13 +102,18 @@ class GeminiLiveSession:
         if self._session is None:
             raise RuntimeError("Live session not started")
 
+        note = (
+            "INTERNAL SENSOR NOTE (PRIVATE CONTEXT - DO NOT REPEAT VERBATIM TO USER): "
+            f"{text}"
+        )
+
         # Best-effort: realtime text tends to be less disruptive than client content.
         # If SDK signature differs, fall back to client content.
         try:
-            await self._session.send_realtime_input(text=text)
+            await self._session.send_realtime_input(text=note)
         except TypeError:
             await self._session.send_client_content(
-                turns={"role": "user", "parts": [{"text": f"INTERNAL OBSERVATION: {text}"}]},
+                turns={"role": "user", "parts": [{"text": note}]},
                 turn_complete=False,
             )
 
