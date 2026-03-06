@@ -7,7 +7,6 @@ FastAPI backend for **NeuroDecode AI** (Gemini Live Agent Challenge MVP).
 - Exposes a WebSocket endpoint for a **live, interruptible** session.
 - Bridges client streaming input (audio/text) to **Gemini Live API** using **Google GenAI SDK**.
 - Streams model audio chunks back to the client.
-- Falls back to a **mock mode** when `GEMINI_API_KEY` is not set (so you can test the WebSocket locally).
 
 ## Current progress (what you should see working now)
 
@@ -39,11 +38,6 @@ $env:GEMINI_API_KEY = "YOUR_KEY_HERE"
 Notes:
 
 - `setx` sets a persistent env var, but it will NOT affect the currently-open terminal.
-- If you want to force mock mode even when the key is present:
-
-```powershell
-$env:NEURODECODE_FORCE_MOCK = "1"
-```
 
 3) Start server (use the backend venv python explicitly):
 

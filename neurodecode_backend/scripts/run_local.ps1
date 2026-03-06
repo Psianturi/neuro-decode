@@ -1,6 +1,5 @@
 param(
   [int]$Port = 8000,
-  [switch]$Mock,
   [string]$HostAddr = "0.0.0.0"
 )
 
@@ -11,12 +10,6 @@ $pythonExe = Join-Path $backendRoot ".venv\Scripts\python.exe"
 
 if (-not (Test-Path $pythonExe)) {
   throw "Venv not found at $pythonExe. Create it first: python -m venv .venv (from $backendRoot)"
-}
-
-if ($Mock) {
-  $env:NEURODECODE_FORCE_MOCK = "1"
-} else {
-  $env:NEURODECODE_FORCE_MOCK = "0"
 }
 
 Push-Location $backendRoot

@@ -8,8 +8,6 @@ from dataclasses import dataclass
 class Settings:
     gemini_api_key: str | None
 
-    force_mock: bool
-
     live_model: str
     response_modality: str
     voice_name: str | None
@@ -20,7 +18,7 @@ class Settings:
 
 def get_settings() -> Settings:
     # The Google GenAI SDK will auto-pick `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
-    # We still read it to decide whether to run in mock mode.
+    # We still read it to validate required runtime config.
     gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
     live_model = os.getenv(
@@ -36,11 +34,8 @@ def get_settings() -> Settings:
         "NEURODECODE_OUTPUT_TRANSCRIPTION", "1"
     ).strip() not in {"0", "false", "False"}
 
-    force_mock = os.getenv("NEURODECODE_FORCE_MOCK", "0").strip() in {"1", "true", "True"}
-
     return Settings(
         gemini_api_key=gemini_api_key,
-        force_mock=force_mock,
         live_model=live_model,
         response_modality=response_modality,
         voice_name=voice_name,

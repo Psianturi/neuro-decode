@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
-from app.mock_live import MockLiveSession
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.settings import get_settings
 
@@ -19,6 +18,9 @@ load_dotenv()
 app = FastAPI(title="NeuroDecode AI Backend")
 
 IDLE_TIMEOUT_SECONDS = 45
+AUDIO_OBSERVER_COOLDOWN_SECONDS = 6
+VISION_OBSERVER_COOLDOWN_SECONDS = 4
+MIN_AUDIO_BYTES_FOR_ANALYSIS = 32000  # ~1s of 16kHz mono PCM16
 
 
 SYSTEM_INSTRUCTION = (
@@ -41,21 +43,30 @@ async def ws_live(websocket: WebSocket) -> None:
     await websocket.accept()
     settings = get_settings()
 
-    session_cm: Any
-    if settings.gemini_api_key and not settings.force_mock:
-        session_cm = GeminiLiveSession(
-            model=settings.live_model,
-            response_modality=settings.response_modality,
-            system_instruction=SYSTEM_INSTRUCTION,
-            voice_name=settings.voice_name,
-            enable_input_transcription=settings.enable_input_transcription,
-            enable_output_transcription=settings.enable_output_transcription,
+    if not settings.gemini_api_key:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "message": "GEMINI_API_KEY is required. Mock mode has been removed.",
+                }
+            )
         )
-    else:
-        session_cm = MockLiveSession()
+        await websocket.close(code=1011, reason="Missing GEMINI_API_KEY")
+        return
 
-    async with session_cm as session:
+    async with GeminiLiveSession(
+        model=settings.live_model,
+        response_modality=settings.response_modality,
+        system_instruction=SYSTEM_INSTRUCTION,
+        voice_name=settings.voice_name,
+        enable_input_transcription=settings.enable_input_transcription,
+        enable_output_transcription=settings.enable_output_transcription,
+    ) as session:
         last_activity = time.monotonic()
+        last_audio_note_ts = 0.0
+        last_vision_note_ts = 0.0
+        audio_observer_buffer = bytearray()
 
         async def idle_monitor() -> None:
             """Close the WebSocket if no client activity for IDLE_TIMEOUT_SECONDS."""
@@ -85,6 +96,20 @@ async def ws_live(websocket: WebSocket) -> None:
                         raise ValueError("audio.data_b64 must be a string")
                     audio_bytes = b64_decode(data_b64)
                     await session.send_audio(audio_bytes, mime_type)
+
+                    # Best-effort local audio signal observer; never blocks main flow.
+                    audio_observer_buffer.extend(audio_bytes)
+                    now = time.monotonic()
+                    if (
+                        len(audio_observer_buffer) >= MIN_AUDIO_BYTES_FOR_ANALYSIS
+                        and (now - last_audio_note_ts) >= AUDIO_OBSERVER_COOLDOWN_SECONDS
+                    ):
+                        observer_audio = bytes(audio_observer_buffer)
+                        audio_observer_buffer.clear()
+                        note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
+                        if note:
+                            await session.send_observer_note(note)
+                            last_audio_note_ts = now
                 elif msg_type == "text":
                     text = msg.get("text")
                     end_of_turn = msg.get("end_of_turn", True)
@@ -96,6 +121,14 @@ async def ws_live(websocket: WebSocket) -> None:
                     mime_type = msg.get("mime_type") or "image/jpeg"
                     if not isinstance(data_b64, str):
                         raise ValueError("image.data_b64 must be a string")
+
+                    now = time.monotonic()
+                    if (now - last_vision_note_ts) >= VISION_OBSERVER_COOLDOWN_SECONDS:
+                        note = await asyncio.to_thread(ai_engine.process_vision_frame, data_b64)
+                        if note:
+                            await session.send_observer_note(note)
+                            last_vision_note_ts = now
+
                     image_bytes = b64_decode(data_b64)
                     await session.send_image(image_bytes, mime_type)
                 elif msg_type == "observer_note":
