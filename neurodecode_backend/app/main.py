@@ -3,9 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections import deque
+from datetime import datetime, timezone
+from urllib import error as urlerror
+from urllib import parse as urlparse
+from urllib import request as urlrequest
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from google import genai
 
 from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
@@ -21,6 +27,11 @@ IDLE_TIMEOUT_SECONDS = 45
 AUDIO_OBSERVER_COOLDOWN_SECONDS = 6
 VISION_OBSERVER_COOLDOWN_SECONDS = 4
 MIN_AUDIO_BYTES_FOR_ANALYSIS = 32000  # ~1s of 16kHz mono PCM16
+LATEST_SESSION_MAX_ITEMS = 10
+
+
+_latest_sessions: deque[dict[str, object]] = deque(maxlen=LATEST_SESSION_MAX_ITEMS)
+_latest_sessions_lock = asyncio.Lock()
 
 
 SYSTEM_INSTRUCTION = (
@@ -38,10 +49,175 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+def _truncate_items(items: list[str], max_items: int = 14) -> list[str]:
+    if len(items) <= max_items:
+        return items
+    return items[-max_items:]
+
+
+def _build_summary_prompt(
+    *,
+    duration_seconds: int,
+    close_reason: str,
+    observer_notes: list[str],
+    transcript_in: list[str],
+    transcript_out: list[str],
+) -> str:
+    clipped_observer_notes = _truncate_items(observer_notes, 18)
+    clipped_in = _truncate_items(transcript_in, 10)
+    clipped_out = _truncate_items(transcript_out, 10)
+
+    return (
+        "You are producing a post-crisis caregiver report for an autism support session. "
+        "Use concise, practical, non-diagnostic language.\n\n"
+        "Output MUST follow this exact structure:\n"
+        "TITLE: <short title>\n"
+        "TRIGGERS_VISUAL: <1 sentence>\n"
+        "TRIGGERS_AUDIO: <1 sentence>\n"
+        "AGENT_ACTIONS: <1-2 sentences>\n"
+        "FOLLOW_UP: <1-2 sentences>\n"
+        "SAFETY_NOTE: <1 sentence>\n\n"
+        f"Session metadata:\n- Duration seconds: {duration_seconds}\n- Close reason: {close_reason}\n\n"
+        f"Observer notes:\n{json.dumps(clipped_observer_notes, ensure_ascii=True)}\n\n"
+        f"Caregiver/user transcript excerpts:\n{json.dumps(clipped_in, ensure_ascii=True)}\n\n"
+        f"Agent transcript excerpts:\n{json.dumps(clipped_out, ensure_ascii=True)}\n"
+    )
+
+
+def generate_session_summary(
+    *,
+    model: str,
+    duration_seconds: int,
+    close_reason: str,
+    observer_notes: list[str],
+    transcript_in: list[str],
+    transcript_out: list[str],
+) -> str:
+    prompt = _build_summary_prompt(
+        duration_seconds=duration_seconds,
+        close_reason=close_reason,
+        observer_notes=observer_notes,
+        transcript_in=transcript_in,
+        transcript_out=transcript_out,
+    )
+    client = genai.Client()
+    response = client.models.generate_content(model=model, contents=prompt)
+
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    return "TITLE: Session Summary\nTRIGGERS_VISUAL: No strong visual trigger detected.\nTRIGGERS_AUDIO: No strong audio trigger detected.\nAGENT_ACTIONS: The agent provided calming, practical support in real time.\nFOLLOW_UP: Keep environment low-stimulation and monitor signs of overload.\nSAFETY_NOTE: This summary is non-diagnostic and for caregiver support only."
+
+
+def _extract_structured_summary(summary_text: str) -> dict[str, str]:
+    fields = {
+        "TITLE": "Session Summary",
+        "TRIGGERS_VISUAL": "No strong visual trigger detected.",
+        "TRIGGERS_AUDIO": "No strong audio trigger detected.",
+        "AGENT_ACTIONS": "The agent provided calming support in real time.",
+        "FOLLOW_UP": "Keep the environment low-stimulation and monitor overload signs.",
+        "SAFETY_NOTE": "Non-diagnostic support summary for caregivers only.",
+    }
+
+    for line in summary_text.splitlines():
+        raw = line.strip()
+        if not raw or ":" not in raw:
+            continue
+        key, value = raw.split(":", 1)
+        key = key.strip().upper()
+        value = value.strip()
+        if key in fields and value:
+            fields[key] = value
+
+    return fields
+
+
+def _escape_markdown_v2(text: str) -> str:
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    escaped = []
+    for ch in text:
+        if ch in special_chars:
+            escaped.append("\\" + ch)
+        else:
+            escaped.append(ch)
+    return "".join(escaped)
+
+
+async def _store_session_summary(record: dict[str, object]) -> None:
+    async with _latest_sessions_lock:
+        _latest_sessions.appendleft(record)
+
+
+async def _get_latest_session_summary() -> dict[str, object] | None:
+    async with _latest_sessions_lock:
+        if not _latest_sessions:
+            return None
+        return dict(_latest_sessions[0])
+
+
+def _format_telegram_message(*, duration_seconds: int, summary_text: str) -> str:
+    minutes = max(1, round(duration_seconds / 60))
+    fields = _extract_structured_summary(summary_text)
+
+    title = _escape_markdown_v2(fields["TITLE"])
+    visual = _escape_markdown_v2(fields["TRIGGERS_VISUAL"])
+    audio = _escape_markdown_v2(fields["TRIGGERS_AUDIO"])
+    actions = _escape_markdown_v2(fields["AGENT_ACTIONS"])
+    follow_up = _escape_markdown_v2(fields["FOLLOW_UP"])
+    safety = _escape_markdown_v2(fields["SAFETY_NOTE"])
+
+    return (
+        "🚨 *NeuroDecode Alert*\n"
+        f"*Sesi intervensi selesai* \\(durasi: {minutes} menit\\)\n"
+        f"*Ringkasan:* {title}\n\n"
+        f"👁️ *Pemicu Visual:* {visual}\n"
+        f"👂 *Pemicu Audio:* {audio}\n"
+        f"🤖 *Tindakan Agen:* {actions}\n"
+        f"💡 *Saran Tindak Lanjut:* {follow_up}\n"
+        f"⚠️ *Catatan Keselamatan:* {safety}"
+    )
+
+
+def send_telegram_summary(*, bot_token: str, chat_id: str, text: str) -> None:
+    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "MarkdownV2",
+        "disable_web_page_preview": True,
+    }
+    encoded = urlparse.urlencode(payload).encode("utf-8")
+    req = urlrequest.Request(api_url, data=encoded, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    with urlrequest.urlopen(req, timeout=10) as resp:
+        if resp.status >= 300:
+            raise RuntimeError(f"Telegram send failed with status {resp.status}")
+
+
 @app.get("/health")
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/sessions/latest")
+async def sessions_latest() -> dict[str, object]:
+    latest = await _get_latest_session_summary()
+    if latest is None:
+        return {"status": "empty", "message": "No completed session summary yet"}
+    return {"status": "ok", "session": latest}
+
+
+@app.get("/sessions")
+async def sessions_list() -> dict[str, object]:
+    async with _latest_sessions_lock:
+        items = [dict(item) for item in _latest_sessions]
+    return {
+        "status": "ok",
+        "count": len(items),
+        "sessions": items,
+    }
 
 
 @app.websocket("/ws/live")
@@ -69,18 +245,85 @@ async def ws_live(websocket: WebSocket) -> None:
         enable_input_transcription=settings.enable_input_transcription,
         enable_output_transcription=settings.enable_output_transcription,
     ) as session:
+        session_start = time.monotonic()
+        close_reason = "unknown"
         last_activity = time.monotonic()
         last_audio_note_ts = 0.0
         last_vision_note_ts = 0.0
         audio_observer_buffer = bytearray()
+        observer_notes_log: list[str] = []
+        transcript_in_log: list[str] = []
+        transcript_out_log: list[str] = []
+
+        async def maybe_summarize_and_notify() -> None:
+            if not settings.summary_enabled:
+                return
+
+            if not (observer_notes_log or transcript_in_log or transcript_out_log):
+                return
+
+            duration_seconds = int(max(1, time.monotonic() - session_start))
+
+            try:
+                summary = await asyncio.to_thread(
+                    generate_session_summary,
+                    model=settings.summary_model,
+                    duration_seconds=duration_seconds,
+                    close_reason=close_reason,
+                    observer_notes=list(observer_notes_log),
+                    transcript_in=list(transcript_in_log),
+                    transcript_out=list(transcript_out_log),
+                )
+            except Exception as e:
+                print(f"[session_summary] Failed to generate summary: {e}")
+                return
+
+            print("[session_summary] Generated post-crisis summary")
+
+            structured = _extract_structured_summary(summary)
+            duration_minutes = max(1, round(duration_seconds / 60))
+            await _store_session_summary(
+                {
+                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "duration_minutes": duration_minutes,
+                    "close_reason": close_reason,
+                    "summary_text": summary,
+                    "structured": {
+                        "title": structured["TITLE"],
+                        "triggers_visual": structured["TRIGGERS_VISUAL"],
+                        "triggers_audio": structured["TRIGGERS_AUDIO"],
+                        "agent_actions": structured["AGENT_ACTIONS"],
+                        "follow_up": structured["FOLLOW_UP"],
+                        "safety_note": structured["SAFETY_NOTE"],
+                    },
+                }
+            )
+
+            if settings.telegram_bot_token and settings.telegram_chat_id:
+                message = _format_telegram_message(
+                    duration_seconds=duration_seconds,
+                    summary_text=summary,
+                )
+                try:
+                    await asyncio.to_thread(
+                        send_telegram_summary,
+                        bot_token=settings.telegram_bot_token,
+                        chat_id=settings.telegram_chat_id,
+                        text=message,
+                    )
+                    print("[telegram] Summary notification sent")
+                except (urlerror.URLError, RuntimeError) as e:
+                    print(f"[telegram] Failed to send summary: {e}")
 
         async def idle_monitor() -> None:
             """Close the WebSocket if no client activity for IDLE_TIMEOUT_SECONDS."""
-            nonlocal last_activity
+            nonlocal close_reason, last_activity
             while True:
                 await asyncio.sleep(5)
                 if time.monotonic() - last_activity > IDLE_TIMEOUT_SECONDS:
                     print(f"[idle_monitor] No activity for {IDLE_TIMEOUT_SECONDS}s — closing session")
+                    close_reason = "idle_timeout"
                     await websocket.send_text(
                         json.dumps({"type": "error", "message": "Session closed: idle timeout"})
                     )
@@ -88,7 +331,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     return
 
         async def pump_client_to_gemini() -> None:
-            nonlocal last_activity
+            nonlocal close_reason, last_activity
             while True:
                 raw = await websocket.receive_text()
                 last_activity = time.monotonic()
@@ -114,6 +357,7 @@ async def ws_live(websocket: WebSocket) -> None:
                         audio_observer_buffer.clear()
                         note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
                         if note:
+                            observer_notes_log.append(note)
                             await session.send_observer_note(note)
                             last_audio_note_ts = now
                 elif msg_type == "text":
@@ -121,6 +365,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     end_of_turn = msg.get("end_of_turn", True)
                     if not isinstance(text, str):
                         raise ValueError("text.text must be a string")
+                    if text.strip():
+                        transcript_in_log.append(text.strip())
                     await session.send_text(text, bool(end_of_turn))
                 elif msg_type == "image":
                     data_b64 = msg.get("data_b64")
@@ -132,6 +378,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     if (now - last_vision_note_ts) >= VISION_OBSERVER_COOLDOWN_SECONDS:
                         note = await asyncio.to_thread(ai_engine.process_vision_frame, data_b64)
                         if note:
+                            observer_notes_log.append(note)
                             await session.send_observer_note(note)
                             last_vision_note_ts = now
 
@@ -141,8 +388,11 @@ async def ws_live(websocket: WebSocket) -> None:
                     text = msg.get("text")
                     if not isinstance(text, str):
                         raise ValueError("observer_note.text must be a string")
+                    if text.strip():
+                        observer_notes_log.append(text.strip())
                     await session.send_observer_note(text)
                 elif msg_type == "close":
+                    close_reason = "client_close"
                     return
                 else:
                     raise ValueError(f"Unsupported message type: {msg_type}")
@@ -161,6 +411,12 @@ async def ws_live(websocket: WebSocket) -> None:
                     )
                 elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                     if out.text:
+                        if out.type == "transcript_in":
+                            transcript_in_log.append(out.text.strip())
+                        elif out.type == "transcript_out":
+                            transcript_out_log.append(out.text.strip())
+                        elif out.type == "model_text":
+                            transcript_out_log.append(out.text.strip())
                         await websocket.send_text(
                             json.dumps({"type": out.type, "text": out.text})
                         )
@@ -176,7 +432,7 @@ async def ws_live(websocket: WebSocket) -> None:
 
             done, pending = await asyncio.wait(
                 {client_task, gemini_task, idle_task},
-                return_when=asyncio.FIRST_EXCEPTION,
+                return_when=asyncio.FIRST_COMPLETED,
             )
 
             for task in pending:
@@ -187,10 +443,15 @@ async def ws_live(websocket: WebSocket) -> None:
                 if exc is None:
                     continue
                 if isinstance(exc, WebSocketDisconnect):
+                    close_reason = "client_disconnect"
                     return
                 raise exc
 
         except WebSocketDisconnect:
+            close_reason = "client_disconnect"
             return
         except Exception as e:
+            close_reason = "error"
             await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+        finally:
+            await maybe_summarize_and_notify()
