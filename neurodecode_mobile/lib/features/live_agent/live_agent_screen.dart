@@ -714,7 +714,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 Text(
                   !_isConnected
                       ? 'Not connected'
-                      : (_isMicActive ? 'Tap to stop recording' : 'Tap to speak'),
+                      : (_isMicActive
+                          ? 'Recording... tap again to send'
+                          : 'Tap once to record, tap again to send'),
                   style: const TextStyle(
                     color: NeuroColors.textSecondary,
                     fontSize: 12,

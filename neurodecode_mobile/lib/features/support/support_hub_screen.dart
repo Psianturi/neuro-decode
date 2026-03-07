@@ -84,6 +84,10 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               },
               icon: const Icon(Icons.play_circle_fill),
               label: const Text('START LIVE SUPPORT'),
+              style: ElevatedButton.styleFrom(
+                elevation: 6,
+                shadowColor: NeuroColors.primary.withValues(alpha: 0.28),
+              ),
             ),
           ),
           const SizedBox(height: 12),

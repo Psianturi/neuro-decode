@@ -24,9 +24,11 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
   late final AnimationController _floatController;
   late final Animation<double> _floatAnimation;
 
+  String _selectedGuide = 'overview';
   int _phraseIndex = 0;
+
   static const List<String> _phrases = [
-    'Hi! I am Neuro Buddy! You can call me Neu.. Let us keep this moment calm and safe.',
+    'Hi! I am Neuro Buddy. Let us keep this moment calm and safe.',
     'Great job. You did your best today, and that matters.',
     'Try this breathing rhythm: inhale for 4, hold for 7, exhale for 8.',
     'You are not alone. I am right here with you.',
@@ -40,12 +42,8 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
       duration: const Duration(milliseconds: 700),
     );
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.06).animate(
-      CurvedAnimation(
-        parent: _pulseController,
-        curve: Curves.easeInOut,
-      ),
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-
     _floatController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2400),
@@ -70,6 +68,30 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
       ..stop()
       ..forward(from: 0.0)
       ..reverse();
+  }
+
+  String get _guideTitle {
+    switch (_selectedGuide) {
+      case 'breathe':
+        return 'Breathe with Buddy';
+      case 'privacy':
+        return 'Privacy & Safety';
+      case 'overview':
+      default:
+        return 'What is NeuroDecode?';
+    }
+  }
+
+  String get _guideBody {
+    switch (_selectedGuide) {
+      case 'breathe':
+        return 'Try this together: inhale for 4, hold for 4, exhale slowly for 6. Repeat three times. Keep your voice soft and your steps simple.';
+      case 'privacy':
+        return 'Camera and microphone are used only during Live Support to help generate calm, real-time guidance. NeuroDecode is a support tool, not a medical diagnosis tool.';
+      case 'overview':
+      default:
+        return 'I am your real-time support companion. When a sensory overload or crisis begins, open the Support tab, turn on camera and microphone, and place the phone nearby. I will listen, observe, and offer short calming guidance to help you and your child through the moment.';
+    }
   }
 
   @override
@@ -117,7 +139,10 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
           const Text(
             'Tap Buddy to wave hello',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF7BA6D4), fontWeight: FontWeight.w600),
+            style: TextStyle(
+              color: Color(0xFF7BA6D4),
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 14),
           Container(
@@ -130,6 +155,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
               children: [
                 const Text(
                   'Hi! I am Buddy! 👋',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 34,
                     fontWeight: FontWeight.w700,
@@ -146,40 +172,68 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                     fontSize: 16,
                   ),
                 ),
-                const SizedBox(height: 12),
-                const Wrap(
+                const SizedBox(height: 14),
+                Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   alignment: WrapAlignment.center,
                   children: [
-                    _BuddyTag(label: 'Friendly'),
-                    _BuddyTag(label: 'Caring'),
-                    _BuddyTag(label: 'Fun'),
+                    _BuddyActionChip(
+                      label: 'How it works',
+                      selected: _selectedGuide == 'overview',
+                      onPressed: () => setState(() => _selectedGuide = 'overview'),
+                    ),
+                    _BuddyActionChip(
+                      label: 'Breathe',
+                      selected: _selectedGuide == 'breathe',
+                      onPressed: () => setState(() => _selectedGuide = 'breathe'),
+                    ),
+                    _BuddyActionChip(
+                      label: 'Privacy',
+                      selected: _selectedGuide == 'privacy',
+                      onPressed: () => setState(() => _selectedGuide = 'privacy'),
+                    ),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            height: 56,
-            child: ElevatedButton.icon(
-              onPressed: widget.onGoHome,
-              icon: const Icon(Icons.home),
-              label: const Text('Back to Home'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF75A9DE),
-                foregroundColor: Colors.white,
-              ),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
             ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 50,
-            child: OutlinedButton.icon(
-              onPressed: widget.onGoSupport,
-              icon: const Icon(Icons.support_agent),
-              label: const Text('Start Live Support'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _guideTitle,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2F4761),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _guideBody,
+                  style: const TextStyle(
+                    color: Color(0xFF607585),
+                    height: 1.55,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Use the Support tab below whenever you need live help.',
+                  style: TextStyle(
+                    color: const Color(0xFF6EA1D5).withValues(alpha: 0.95),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -188,23 +242,29 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
   }
 }
 
-class _BuddyTag extends StatelessWidget {
-  const _BuddyTag({required this.label});
+class _BuddyActionChip extends StatelessWidget {
+  const _BuddyActionChip({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
 
   final String label;
+  final bool selected;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE9F0FB),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
+    return ActionChip(
+      onPressed: onPressed,
+      backgroundColor:
+          selected ? const Color(0xFF75A9DE) : const Color(0xFFE9F0FB),
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      label: Text(
         label,
-        style: const TextStyle(
-          color: Color(0xFF75A9DE),
+        style: TextStyle(
+          color: selected ? Colors.white : const Color(0xFF75A9DE),
           fontWeight: FontWeight.w600,
         ),
       ),

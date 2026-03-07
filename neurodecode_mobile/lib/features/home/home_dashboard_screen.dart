@@ -84,9 +84,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
                 color: NeuroColors.surface,
                 borderRadius: BorderRadius.circular(20),
@@ -99,20 +99,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       borderRadius: BorderRadius.circular(18),
                       child: Image.asset(
                         'assets/mascot01.png',
-                        width: 170,
-                        height: 170,
+                        width: 118,
+                        height: 118,
                         fit: BoxFit.cover,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Text(
-                    'NeuroDecode Live Support',
+                    'Hello. Wishing you a calm day.',
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Real-time decision support for caregivers. Non-medical support only.',
+                    'Review the latest session, check insights, and open Live Support when you need real-time guidance.',
                     style: TextStyle(color: NeuroColors.textSecondary),
                   ),
                 ],
