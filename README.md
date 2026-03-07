@@ -81,6 +81,10 @@ python -m venv .venv
 $env:GEMINI_API_KEY = "YOUR_KEY_HERE"
 $env:NEURODECODE_SUMMARY_ENABLED = "1"
 $env:NEURODECODE_SUMMARY_MODEL = "gemini-2.0-flash"
+$env:NEURODECODE_FIRESTORE_ENABLED = "1"
+$env:NEURODECODE_FIRESTORE_COLLECTION = "sessions"
+# Optional for local non-GCP execution
+# $env:GOOGLE_APPLICATION_CREDENTIALS = "C:\\path\\to\\service-account.json"
 $env:TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 $env:TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
 .\.venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -121,6 +125,11 @@ cd c:\PROJ\NeuroDecode\neurodecode_backend
 gcloud run deploy neurodecode-backend --source . --region asia-southeast1 --allow-unauthenticated --timeout 3600 --concurrency 1 --memory 4Gi
 ```
 
+Firestore env for Cloud Run deployment:
+```powershell
+gcloud run services update neurodecode-backend --region asia-southeast1 --update-env-vars NEURODECODE_FIRESTORE_ENABLED=1,NEURODECODE_FIRESTORE_COLLECTION=sessions
+```
+
 ## Runtime Notes
 1. Backend is real-only mode. `GEMINI_API_KEY` is required.
 2. Observer notes are private context for Gemini, not user-facing text.
@@ -129,6 +138,7 @@ gcloud run deploy neurodecode-backend --source . --region asia-southeast1 --allo
 5. Post-crisis summary runs on session close with `NEURODECODE_SUMMARY_MODEL` (default `gemini-2.0-flash`).
 6. Telegram notification is sent only when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
 7. Telegram format uses `MarkdownV2` with character escaping to avoid API error 400.
+8. Session history is persisted to Firestore (collection `sessions`) with memory fallback when Firestore is unavailable.
 
 ## Session Summary API
 Use this endpoint to render History/Insight in Flutter after a session ends.

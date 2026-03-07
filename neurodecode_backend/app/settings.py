@@ -20,6 +20,10 @@ class Settings:
     telegram_bot_token: str | None
     telegram_chat_id: str | None
 
+    firestore_enabled: bool
+    firestore_collection: str
+    firestore_project: str | None
+
 
 def get_settings() -> Settings:
     # The Google GenAI SDK will auto-pick `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
@@ -48,6 +52,14 @@ def get_settings() -> Settings:
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or None
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID") or None
 
+    firestore_enabled = os.getenv("NEURODECODE_FIRESTORE_ENABLED", "1").strip() not in {
+        "0",
+        "false",
+        "False",
+    }
+    firestore_collection = os.getenv("NEURODECODE_FIRESTORE_COLLECTION", "sessions")
+    firestore_project = os.getenv("NEURODECODE_FIRESTORE_PROJECT") or None
+
     return Settings(
         gemini_api_key=gemini_api_key,
         live_model=live_model,
@@ -59,4 +71,7 @@ def get_settings() -> Settings:
         summary_model=summary_model,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
+        firestore_enabled=firestore_enabled,
+        firestore_collection=firestore_collection,
+        firestore_project=firestore_project,
     )

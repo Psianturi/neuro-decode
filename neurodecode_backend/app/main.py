@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections import deque
 from datetime import datetime, timezone
 from urllib import error as urlerror
 from urllib import parse as urlparse
@@ -16,6 +15,7 @@ from google import genai
 from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
 from app.protocol import b64_decode, b64_encode, ensure_type
+from app.session_store import SessionStore
 from app.settings import get_settings
 
 
@@ -28,10 +28,6 @@ AUDIO_OBSERVER_COOLDOWN_SECONDS = 6
 VISION_OBSERVER_COOLDOWN_SECONDS = 4
 MIN_AUDIO_BYTES_FOR_ANALYSIS = 32000  # ~1s of 16kHz mono PCM16
 LATEST_SESSION_MAX_ITEMS = 10
-
-
-_latest_sessions: deque[dict[str, object]] = deque(maxlen=LATEST_SESSION_MAX_ITEMS)
-_latest_sessions_lock = asyncio.Lock()
 
 
 SYSTEM_INSTRUCTION = (
@@ -145,15 +141,20 @@ def _escape_markdown_v2(text: str) -> str:
 
 
 async def _store_session_summary(record: dict[str, object]) -> None:
-    async with _latest_sessions_lock:
-        _latest_sessions.appendleft(record)
+    await session_store.store(record)
 
 
 async def _get_latest_session_summary() -> dict[str, object] | None:
-    async with _latest_sessions_lock:
-        if not _latest_sessions:
-            return None
-        return dict(_latest_sessions[0])
+    return await session_store.get_latest()
+
+
+_startup_settings = get_settings()
+session_store = SessionStore(
+    firestore_enabled=_startup_settings.firestore_enabled,
+    firestore_collection=_startup_settings.firestore_collection,
+    firestore_project=_startup_settings.firestore_project,
+    max_memory_items=LATEST_SESSION_MAX_ITEMS,
+)
 
 
 def _format_telegram_message(*, duration_seconds: int, summary_text: str) -> str:
@@ -211,8 +212,7 @@ async def sessions_latest() -> dict[str, object]:
 
 @app.get("/sessions")
 async def sessions_list() -> dict[str, object]:
-    async with _latest_sessions_lock:
-        items = [dict(item) for item in _latest_sessions]
+    items = await session_store.list_recent(LATEST_SESSION_MAX_ITEMS)
     return {
         "status": "ok",
         "count": len(items),

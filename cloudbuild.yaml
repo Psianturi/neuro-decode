@@ -33,6 +33,8 @@ steps:
       - '1'
       - '--memory'
       - '4Gi'
+      - '--set-env-vars'
+      - 'NEURODECODE_FIRESTORE_ENABLED=1,NEURODECODE_FIRESTORE_COLLECTION=sessions'
 
 images:
   - 'gcr.io/$PROJECT_ID/neurodecode-backend'
