@@ -48,7 +48,8 @@ def get_settings() -> Settings:
         "false",
         "False",
     }
-    summary_model = os.getenv("NEURODECODE_SUMMARY_MODEL", "gemini-2.0-flash")
+    # Cost-efficient default for post-session summaries.
+    summary_model = os.getenv("NEURODECODE_SUMMARY_MODEL", "gemini-2.5-flash-lite")
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or None
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID") or None
 

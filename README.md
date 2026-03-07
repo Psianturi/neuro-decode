@@ -80,7 +80,7 @@ python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 $env:GEMINI_API_KEY = "YOUR_KEY_HERE"
 $env:NEURODECODE_SUMMARY_ENABLED = "1"
-$env:NEURODECODE_SUMMARY_MODEL = "gemini-2.0-flash"
+$env:NEURODECODE_SUMMARY_MODEL = "gemini-2.5-flash-lite"
 $env:NEURODECODE_FIRESTORE_ENABLED = "1"
 $env:NEURODECODE_FIRESTORE_COLLECTION = "sessions"
 # Optional for local non-GCP execution
@@ -135,7 +135,7 @@ gcloud run services update neurodecode-backend --region asia-southeast1 --update
 2. Observer notes are private context for Gemini, not user-facing text.
 3. TensorFlow models are lazy-loaded at first inference call to reduce cold start impact.
 4. First vision/audio inference may have higher latency due to model initialization.
-5. Post-crisis summary runs on session close with `NEURODECODE_SUMMARY_MODEL` (default `gemini-2.0-flash`).
+5. Post-crisis summary runs on session close with `NEURODECODE_SUMMARY_MODEL` (default `gemini-2.5-flash-lite`).
 6. Telegram notification is sent only when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
 7. Telegram format uses `MarkdownV2` with character escaping to avoid API error 400.
 8. Session history is persisted to Firestore (collection `sessions`) with memory fallback when Firestore is unavailable.

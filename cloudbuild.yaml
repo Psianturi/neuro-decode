@@ -34,7 +34,7 @@ steps:
       - '--memory'
       - '4Gi'
       - '--set-env-vars'
-      - 'NEURODECODE_FIRESTORE_ENABLED=1,NEURODECODE_FIRESTORE_COLLECTION=sessions'
+      - 'NEURODECODE_FIRESTORE_ENABLED=1,NEURODECODE_FIRESTORE_COLLECTION=sessions,NEURODECODE_SUMMARY_MODEL=gemini-2.5-flash-lite'
 
 images:
   - 'gcr.io/$PROJECT_ID/neurodecode-backend'

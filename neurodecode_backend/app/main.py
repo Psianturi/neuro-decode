@@ -331,7 +331,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     return
 
         async def pump_client_to_gemini() -> None:
-            nonlocal close_reason, last_activity
+            nonlocal close_reason, last_activity, last_audio_note_ts, last_vision_note_ts
             while True:
                 raw = await websocket.receive_text()
                 last_activity = time.monotonic()

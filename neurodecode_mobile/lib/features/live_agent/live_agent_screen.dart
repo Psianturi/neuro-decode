@@ -34,7 +34,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSub;
   AgentState _state = AgentState.idle;
-  bool _showDebug = false;
 
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micStreamSub;
@@ -43,6 +42,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   CameraController? _cameraController;
   Timer? _visionTimer;
   bool _isCapturingFrame = false;
+  bool _isCleaningUp = false;
 
   final BytesBuilder _currentTurnAudioBuffer = BytesBuilder(copy: false);
   bool _seenTranscriptOutInCurrentTurn = false;
@@ -95,8 +95,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   bool get _isConnected =>
-      _state != AgentState.idle &&
-      _state != AgentState.error;
+      _channel != null && _wsSub != null && _state != AgentState.error;
 
   void _setStateLabel(AgentState next) {
     if (!mounted) return;
@@ -145,7 +144,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       useSafeArea: true,
       builder: (_) => ObserverPanelSheet(
         events: _observerEvents,
-        onInjectTest: _injectTestObserverEvent,
       ),
     );
   }
@@ -247,42 +245,17 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     });
   }
 
-  void _injectTestObserverEvent() {
-    final samples = <(String, ObserverConfidence)>[
-      (
-        'Detected repetitive hand movement (stimming) in the last 5 seconds.',
-        ObserverConfidence.high,
-      ),
-      (
-        'Body movement increasing, possible restlessness trend.',
-        ObserverConfidence.medium,
-      ),
-      (
-        'Posture appears stable and calm.',
-        ObserverConfidence.low,
-      ),
-    ];
-    final sample = samples[DateTime.now().millisecond % samples.length];
-
-    _addObserverEvent(text: sample.$1, confidence: sample.$2);
-    _logDebug('observer_event', 'injected test event');
-
-    final currentChannel = _channel;
-    if (currentChannel != null && _isConnected) {
-      currentChannel.sink.add(
-        jsonEncode(
-          {
-            'type': 'observer_note',
-            'text': 'INTERNAL_OBSERVATION: ${sample.$1}',
-          },
-        ),
-      );
-      _logDebug('observer_event', 'observer_note sent to backend');
-    }
-  }
-
   void _toggleMic() async {
-    if (!_isConnected) return;
+    if (!_isConnected) {
+      _addLog('System', 'Agent is not connected yet. Reconnecting...');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Agent disconnected. Reconnecting...')),
+        );
+      }
+      _connect();
+      return;
+    }
     if (_isMicActive) {
       await _stopMicStream();
     } else {
@@ -521,12 +494,21 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _handleSocketClosed({required bool manual}) {
+    if (_isCleaningUp) return;
+    _isCleaningUp = true;
+
     _stopVisionLoop();
     _stopMicStreamSync();
-    _wsSub?.cancel();
+
+    // Cancel subscription BEFORE closing sink to prevent onDone re-fire.
+    final sub = _wsSub;
     _wsSub = null;
-    _channel?.sink.close();
+    sub?.cancel();
+
+    final ch = _channel;
     _channel = null;
+    ch?.sink.close();
+
     _currentTurnAudioBuffer.clear();
     _seenTranscriptOutInCurrentTurn = false;
     _lastGeminiChunkAt = null;
@@ -538,11 +520,21 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _addLog('System', 'Session terminated.');
       }
     }
+    _isCleaningUp = false;
   }
 
   @override
   void dispose() {
-    _handleSocketClosed(manual: false);
+    // Inline cleanup without calling _handleSocketClosed to avoid setState during dispose.
+    _isCleaningUp = true;
+    _stopVisionLoop();
+    _stopMicStreamSync();
+    _wsSub?.cancel();
+    _wsSub = null;
+    _channel?.sink.close();
+    _channel = null;
+    _currentTurnAudioBuffer.clear();
+    _player.stop();
     _scrollController.dispose();
     _cameraController?.dispose();
     _recorder.dispose();
@@ -573,19 +565,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       appBar: AppBar(
         title: Text('Live Session • $_stateLabel'),
         actions: [
-          IconButton(
-            onPressed: _openObserverPanel,
-            icon: const Icon(Icons.insights),
-            tooltip: 'Observer Panel',
-          ),
-          IconButton(
-            onPressed: () {
-              setState(() {
-                _showDebug = !_showDebug;
-              });
-            },
-            icon: const Icon(Icons.bug_report),
-          ),
+          if (widget.observerEnabled)
+            IconButton(
+              onPressed: _openObserverPanel,
+              icon: const Icon(Icons.insights),
+              tooltip: 'Observer Panel',
+            ),
         ],
       ),
       body: Stack(
@@ -603,6 +588,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     final text = entry['text']!;
                     final isGemini = sender == 'Gemini';
                     final isSystem = sender == 'System' || sender == 'Error';
+                    final isLight = Theme.of(context).brightness == Brightness.light;
 
                     return Align(
                       alignment: isSystem
@@ -624,7 +610,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                         child: Text(
                           isSystem ? text : '$sender: $text',
                           style: TextStyle(
-                            color: isSystem ? Colors.grey : Colors.white,
+                            color: isSystem
+                                ? Colors.grey
+                                : (isLight ? NeuroColors.textPrimary : Colors.white),
                             fontStyle: isSystem
                                 ? FontStyle.italic
                                 : FontStyle.normal,
@@ -680,42 +668,24 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 ),
               ),
             ),
-          if (_showDebug)
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 130,
-              child: Container(
-                height: 170,
-                padding: const EdgeInsets.all(8),
-                color: Colors.black.withValues(alpha: 0.85),
-                child: ListView.builder(
-                  itemCount: _debugLog.length,
-                  itemBuilder: (context, index) => Text(
-                    _debugLog[index],
-                    style: const TextStyle(
-                      color: NeuroColors.primary,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-              ),
-            ),
           Positioned(
             bottom: 24,
             left: 0,
             right: 0,
             child: Column(
               children: [
+                // ── Mic button: only active when connected ──
                 GestureDetector(
-                  onTap: _toggleMic,
+                  onTap: _isConnected ? _toggleMic : null,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: _isMicActive
-                          ? Colors.redAccent
-                          : NeuroColors.primary,
+                      color: !_isConnected
+                          ? Colors.grey.shade400
+                          : (_isMicActive
+                              ? Colors.redAccent
+                              : NeuroColors.primary),
                       shape: BoxShape.circle,
                       boxShadow: _isMicActive
                           ? [
@@ -728,11 +698,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                           : [],
                     ),
                     child: Icon(
-                      _isMicActive
-                          ? Icons.stop
-                          : (_state == AgentState.thinking
-                              ? Icons.hourglass_empty
-                              : Icons.mic),
+                      !_isConnected
+                          ? Icons.mic_off
+                          : (_isMicActive
+                              ? Icons.stop
+                              : (_state == AgentState.thinking
+                                  ? Icons.hourglass_empty
+                                  : Icons.mic)),
                       size: 40,
                       color: Colors.white,
                     ),
@@ -740,16 +712,47 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _isMicActive ? 'Tap to stop' : 'Tap to speak',
+                  !_isConnected
+                      ? 'Not connected'
+                      : (_isMicActive ? 'Tap to stop recording' : 'Tap to speak'),
                   style: const TextStyle(
                     color: NeuroColors.textSecondary,
                     fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: _isConnected ? _disconnect : _connect,
-                  child: Text(_isConnected ? 'Stop Agent' : 'Reconnect'),
+   
+                SizedBox(
+                  width: 220,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed:
+                        _state == AgentState.connecting
+                            ? null
+                            : (_isConnected ? _disconnect : _connect),
+                    icon: Icon(
+                      _isConnected
+                          ? Icons.stop_circle_outlined
+                          : (_state == AgentState.connecting
+                              ? Icons.sync
+                              : Icons.play_circle_outline),
+                    ),
+                    label: Text(
+                      _isConnected
+                          ? 'End Session'
+                          : (_state == AgentState.connecting
+                              ? 'Connecting...'
+                              : 'Reconnect'),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                          _isConnected ? Colors.red.shade400 : NeuroColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

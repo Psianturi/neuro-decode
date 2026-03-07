@@ -21,11 +21,9 @@ class ObserverPanelSheet extends StatelessWidget {
   const ObserverPanelSheet({
     super.key,
     required this.events,
-    required this.onInjectTest,
   });
 
   final List<ObserverEvent> events;
-  final VoidCallback onInjectTest;
 
   @override
   Widget build(BuildContext context) {
@@ -58,11 +56,6 @@ class ObserverPanelSheet extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const Spacer(),
-                TextButton.icon(
-                  onPressed: onInjectTest,
-                  icon: const Icon(Icons.bolt),
-                  label: const Text('Inject Test'),
-                ),
               ],
             ),
             const SizedBox(height: 12),

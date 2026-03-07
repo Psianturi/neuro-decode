@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 
-import '../features/home/home_dashboard_screen.dart';
+import '../features/shell/main_shell_screen.dart';
 import '../theme/app_theme.dart';
 
 class NeuroDecodeApp extends StatelessWidget {
@@ -17,8 +17,10 @@ class NeuroDecodeApp extends StatelessWidget {
     return MaterialApp(
       title: 'NeuroDecode AI',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      home: HomeDashboardScreen(cameras: cameras),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkGreenTheme,
+      themeMode: ThemeMode.light,
+      home: MainShellScreen(cameras: cameras),
     );
   }
 }

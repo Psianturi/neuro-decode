@@ -1,0 +1,71 @@
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+
+import '../../theme/app_theme.dart';
+import '../home/home_dashboard_screen.dart';
+import '../mascot/mascot_buddy_screen.dart';
+import '../support/support_hub_screen.dart';
+
+class MainShellScreen extends StatefulWidget {
+  const MainShellScreen({
+    super.key,
+    required this.cameras,
+  });
+
+  final List<CameraDescription> cameras;
+
+  @override
+  State<MainShellScreen> createState() => _MainShellScreenState();
+}
+
+class _MainShellScreenState extends State<MainShellScreen> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          HomeDashboardScreen(
+            cameras: widget.cameras,
+            onGoSupport: () => setState(() => _currentIndex = 1),
+          ),
+          SupportHubScreen(cameras: widget.cameras),
+          MascotBuddyScreen(
+            cameras: widget.cameras,
+            onGoHome: () => setState(() => _currentIndex = 0),
+            onGoSupport: () => setState(() => _currentIndex = 1),
+          ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        backgroundColor: NeuroColors.surface,
+        indicatorColor: NeuroColors.primary.withValues(alpha: 0.22),
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.support_agent_outlined),
+            selectedIcon: Icon(Icons.support_agent),
+            label: 'Support',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.smart_toy_outlined),
+            selectedIcon: Icon(Icons.smart_toy),
+            label: 'Buddy',
+          ),
+        ],
+      ),
+    );
+  }
+}

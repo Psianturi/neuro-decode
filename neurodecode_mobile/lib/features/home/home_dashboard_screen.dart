@@ -2,7 +2,6 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../live_agent/live_agent_screen.dart';
 import 'history_insights_screen.dart';
 import 'session_summary_service.dart';
 import '../../theme/app_theme.dart';
@@ -11,16 +10,17 @@ class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({
     super.key,
     required this.cameras,
+    required this.onGoSupport,
   });
 
   final List<CameraDescription> cameras;
+  final VoidCallback onGoSupport;
 
   @override
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
 }
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
-  bool _observerEnabled = true;
   final SessionSummaryService _summaryService = SessionSummaryService();
   SessionSummary? _latestSummary;
   bool _isLoadingSummary = false;
@@ -68,11 +68,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('NeuroDecode AI')),
-      body: Padding(
+      body: ListView(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             Row(
               children: [
                 const _ConnectionDot(),
@@ -118,23 +119,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            Container(
-              decoration: BoxDecoration(
-                color: NeuroColors.surface,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: SwitchListTile.adaptive(
-                value: _observerEnabled,
-                title: const Text('Camera Observer'),
-                subtitle: const Text('Enable mini camera preview in live session'),
-                onChanged: (value) {
-                  setState(() {
-                    _observerEnabled = value;
-                  });
-                },
-              ),
-            ),
-            const SizedBox(height: 16),
             _LatestSessionCard(
               summary: _latestSummary,
               isLoading: _isLoadingSummary,
@@ -157,28 +141,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 label: const Text('VIEW HISTORY / INSIGHTS'),
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 16),
             SizedBox(
-              height: 56,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => LiveAgentScreen(
-                        cameras: widget.cameras,
-                        observerEnabled: _observerEnabled,
-                      ),
-                    ),
-                  );
-                  await _refreshLatestSummary();
-                },
-                icon: const Icon(Icons.play_circle_fill),
-                label: const Text('START LIVE SUPPORT'),
+              height: 46,
+              child: OutlinedButton.icon(
+                onPressed: widget.onGoSupport,
+                icon: const Icon(Icons.support_agent),
+                label: const Text('GO TO LIVE SUPPORT'),
               ),
             ),
           ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -211,11 +185,14 @@ class _LatestSessionCard extends StatelessWidget {
             children: [
               const Icon(Icons.history_edu, color: NeuroColors.primary),
               const SizedBox(width: 8),
-              Text(
-                'Ringkasan Sesi Terakhir',
-                style: Theme.of(context).textTheme.titleMedium,
+              Expanded(
+                child: Text(
+                  'Latest Session Summary',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ),
-              const Spacer(),
               IconButton(
                 onPressed: isLoading ? null : onRefresh,
                 icon: isLoading
@@ -232,7 +209,7 @@ class _LatestSessionCard extends StatelessWidget {
           const SizedBox(height: 8),
           if (summary == null) ...[
             const Text(
-              'Belum ada sesi yang selesai. Jalankan live support lalu kembali ke dashboard.',
+              'No completed session yet. Run live support and return to dashboard.',
               style: TextStyle(color: NeuroColors.textSecondary),
             ),
           ] else ...[
@@ -242,31 +219,31 @@ class _LatestSessionCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Durasi ${summary!.durationMinutes} menit • ${_formatUtc(summary!.timestampUtc)}',
+              'Duration ${summary!.durationMinutes} min • ${_formatUtc(summary!.timestampUtc)}',
               style: const TextStyle(color: NeuroColors.textSecondary),
             ),
             const SizedBox(height: 12),
             _InsightRow(
               icon: Icons.visibility,
-              label: 'Pemicu Visual',
+              label: 'Visual Trigger',
               text: summary!.triggersVisual,
             ),
             const SizedBox(height: 8),
             _InsightRow(
               icon: Icons.hearing,
-              label: 'Pemicu Audio',
+              label: 'Audio Trigger',
               text: summary!.triggersAudio,
             ),
             const SizedBox(height: 8),
             _InsightRow(
               icon: Icons.psychology_alt,
-              label: 'Tindakan Agen',
+              label: 'Agent Action',
               text: summary!.agentActions,
             ),
             const SizedBox(height: 8),
             _InsightRow(
               icon: Icons.lightbulb,
-              label: 'Tindak Lanjut',
+              label: 'Follow-up',
               text: summary!.followUp,
             ),
           ],
