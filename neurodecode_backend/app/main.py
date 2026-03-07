@@ -23,7 +23,7 @@ load_dotenv()
 
 app = FastAPI(title="NeuroDecode AI Backend")
 
-IDLE_TIMEOUT_SECONDS = 45
+IDLE_TIMEOUT_SECONDS = 120
 AUDIO_OBSERVER_COOLDOWN_SECONDS = 6
 VISION_OBSERVER_COOLDOWN_SECONDS = 4
 MIN_AUDIO_BYTES_FOR_ANALYSIS = 32000  # ~1s of 16kHz mono PCM16
@@ -398,8 +398,10 @@ async def ws_live(websocket: WebSocket) -> None:
                     raise ValueError(f"Unsupported message type: {msg_type}")
 
         async def pump_gemini_to_client() -> None:
+            nonlocal last_activity
             async for out in session.receive():
                 if out.type == "model_audio" and out.data:
+                    last_activity = time.monotonic()
                     await websocket.send_text(
                         json.dumps(
                             {
@@ -411,6 +413,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     )
                 elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                     if out.text:
+                        last_activity = time.monotonic()
                         if out.type == "transcript_in":
                             transcript_in_log.append(out.text.strip())
                         elif out.type == "transcript_out":
@@ -421,8 +424,10 @@ async def ws_live(websocket: WebSocket) -> None:
                             json.dumps({"type": out.type, "text": out.text})
                         )
                 elif out.type == "model_audio_end":
+                    last_activity = time.monotonic()
                     await websocket.send_text(json.dumps({"type": "model_audio_end"}))
                 elif out.type == "interrupted":
+                    last_activity = time.monotonic()
                     await websocket.send_text(json.dumps({"type": "interrupted"}))
 
         try:
@@ -454,4 +459,6 @@ async def ws_live(websocket: WebSocket) -> None:
             close_reason = "error"
             await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
         finally:
+            if close_reason == "unknown":
+                close_reason = "completed"
             await maybe_summarize_and_notify()

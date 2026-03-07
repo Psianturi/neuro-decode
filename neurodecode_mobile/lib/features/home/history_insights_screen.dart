@@ -79,28 +79,28 @@ class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
             else if (_error != null && _items.isEmpty)
               _StateMessageCard(
                 icon: Icons.cloud_off,
-                title: 'Gagal memuat history',
+                title: 'Unable to load history',
                 subtitle: _error!,
                 onAction: _load,
-                actionLabel: 'Coba lagi',
+                actionLabel: 'Try again',
               )
             else if (_items.isEmpty)
               _StateMessageCard(
                 icon: Icons.history_toggle_off,
-                title: 'Belum ada riwayat sesi',
+                title: 'No session history yet',
                 subtitle:
-                    'Selesaikan sesi live support terlebih dahulu untuk melihat insight di sini.',
+                    'Complete a live support session first to see insights here.',
                 onAction: _load,
                 actionLabel: 'Refresh',
               )
             else ...[
               Text(
-                '10 sesi terakhir',
+                'Recent sessions',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 6),
               const Text(
-                'Gunakan data ini untuk melihat pola trigger dan tindak lanjut dari waktu ke waktu.',
+                'Use these summaries to review trigger patterns and follow-up actions over time.',
                 style: TextStyle(color: NeuroColors.textSecondary),
               ),
               const SizedBox(height: 12),
@@ -134,32 +134,32 @@ class _SessionCard extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           subtitle: Text(
-            '${_formatTime(summary.timestampUtc)} • ${summary.durationMinutes} menit • ${summary.closeReason}',
+            '${_formatTime(summary.timestampUtc)} • ${summary.durationMinutes} min • ${summary.closeReasonLabel}',
             style: const TextStyle(color: NeuroColors.textSecondary),
           ),
           leading: const Icon(Icons.event_note, color: NeuroColors.primary),
           children: [
             _DetailRow(
               icon: Icons.visibility,
-              label: 'Pemicu Visual',
+              label: 'Visual Trigger',
               text: summary.triggersVisual,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.hearing,
-              label: 'Pemicu Audio',
+              label: 'Audio Trigger',
               text: summary.triggersAudio,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.psychology_alt,
-              label: 'Tindakan Agen',
+              label: 'Agent Action',
               text: summary.agentActions,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.lightbulb,
-              label: 'Tindak Lanjut',
+              label: 'Follow-up',
               text: summary.followUp,
             ),
             const SizedBox(height: 8),

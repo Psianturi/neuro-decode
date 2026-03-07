@@ -26,6 +26,26 @@ class SessionSummary {
   final String followUp;
   final String safetyNote;
 
+  String get closeReasonLabel {
+    switch (closeReason) {
+      case 'completed':
+        return 'Completed';
+      case 'client_close':
+        return 'Ended by caregiver';
+      case 'client_disconnect':
+        return 'Disconnected';
+      case 'idle_timeout':
+        return 'Timed out';
+      case 'error':
+        return 'Error';
+      case 'unknown':
+      case '-':
+        return 'Completed';
+      default:
+        return closeReason.replaceAll('_', ' ');
+    }
+  }
+
   factory SessionSummary.fromJson(Map<String, dynamic> json) {
     final structured =
         (json['structured'] as Map<String, dynamic>? ?? <String, dynamic>{});
