@@ -44,7 +44,14 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isCapturingFrame = false;
   bool _isCleaningUp = false;
 
-  final BytesBuilder _currentTurnAudioBuffer = BytesBuilder(copy: false);
+  // ── Progressive audio chunk queue ──
+  final BytesBuilder _streamAudioBuffer = BytesBuilder(copy: false);
+  final List<Uint8List> _audioPlayQueue = [];
+  bool _isPlayingQueue = false;
+  bool _geminiTurnComplete = true;
+  StreamSubscription<void>? _playerCompleteSub;
+  static const int _audioChunkThreshold = 12000; // ~0.25s at 24kHz 16-bit mono
+
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
   final List<String> _debugLog = [];
@@ -56,6 +63,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   @override
   void initState() {
     super.initState();
+    _playerCompleteSub = _player.onPlayerComplete.listen((_) {
+      _playNextChunk();
+    });
     _checkPermissions();
     _initCamera();
     _connect();
@@ -185,24 +195,35 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
     if (type == 'model_audio') {
       _setStateLabel(AgentState.speaking);
+      _geminiTurnComplete = false;
       final b64 = (data['data_b64'] ?? '').toString();
       if (b64.isNotEmpty) {
-        _currentTurnAudioBuffer.add(base64Decode(b64));
+        _streamAudioBuffer.add(base64Decode(b64));
+        if (_streamAudioBuffer.length >= _audioChunkThreshold) {
+          _flushAudioBufferToQueue();
+        }
       }
       return;
     }
 
     if (type == 'model_audio_end') {
-      _playBufferedTurnAudio();
+      _geminiTurnComplete = true;
+      _flushAudioBufferToQueue();
       _seenTranscriptOutInCurrentTurn = false;
       _lastGeminiChunkAt = null;
-      _setStateLabel(AgentState.idle);
+      // State transitions to idle when the audio queue drains
+      if (!_isPlayingQueue) {
+        _setStateLabel(AgentState.idle);
+      }
       return;
     }
 
     if (type == 'interrupted') {
-      _currentTurnAudioBuffer.clear();
+      _streamAudioBuffer.takeBytes(); 
+      _audioPlayQueue.clear();
       _player.stop();
+      _isPlayingQueue = false;
+      _geminiTurnComplete = true;
       _addLog('System', 'Gemini response interrupted.');
       _logDebug('player_event', 'interrupted, stop');
       _setStateLabel(AgentState.idle);
@@ -381,23 +402,36 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _setStateLabel(AgentState.thinking);
   }
 
-  Future<void> _playBufferedTurnAudio() async {
-    final pcmBytes = _currentTurnAudioBuffer.takeBytes();
-    if (pcmBytes.isEmpty) {
-      return;
-    }
+  void _flushAudioBufferToQueue() {
+    final pcmBytes = _streamAudioBuffer.takeBytes();
+    if (pcmBytes.isEmpty) return;
 
     final wavBytes = _pcm16ToWav(
-      pcm: pcmBytes,
+      pcm: Uint8List.fromList(pcmBytes),
       sampleRate: 24000,
       channels: 1,
       bitsPerSample: 16,
     );
+    _audioPlayQueue.add(wavBytes);
+    if (!_isPlayingQueue) {
+      _playNextChunk();
+    }
+  }
 
-    _logDebug('player_event', 'buffering bytes=${wavBytes.length}');
+  Future<void> _playNextChunk() async {
+    if (_audioPlayQueue.isEmpty) {
+      _isPlayingQueue = false;
+      if (_geminiTurnComplete) {
+        _setStateLabel(AgentState.idle);
+      }
+      return;
+    }
+    _isPlayingQueue = true;
+    final wav = _audioPlayQueue.removeAt(0);
+    _logDebug('player_event',
+        'playing chunk (${wav.length} bytes, ${_audioPlayQueue.length} queued)');
     await _player.stop();
-    await _player.play(BytesSource(wavBytes));
-    _logDebug('player_event', 'playing');
+    await _player.play(BytesSource(wav));
   }
 
   void _logDebug(String tag, String msg) {
@@ -509,7 +543,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _channel = null;
     ch?.sink.close();
 
-    _currentTurnAudioBuffer.clear();
+    _streamAudioBuffer.takeBytes();
+    _audioPlayQueue.clear();
+    _isPlayingQueue = false;
+    _geminiTurnComplete = true;
     _seenTranscriptOutInCurrentTurn = false;
     _lastGeminiChunkAt = null;
     _player.stop();
@@ -533,7 +570,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _wsSub = null;
     _channel?.sink.close();
     _channel = null;
-    _currentTurnAudioBuffer.clear();
+    _streamAudioBuffer.takeBytes();
+    _audioPlayQueue.clear();
+    _playerCompleteSub?.cancel();
     _player.stop();
     _scrollController.dispose();
     _cameraController?.dispose();
@@ -676,16 +715,20 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
               children: [
                 // ── Mic button: only active when connected ──
                 GestureDetector(
-                  onTap: _isConnected ? _toggleMic : null,
+                  onTap: (_isConnected && _state != AgentState.speaking)
+                      ? _toggleMic
+                      : null,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       color: !_isConnected
                           ? Colors.grey.shade400
-                          : (_isMicActive
-                              ? Colors.redAccent
-                              : NeuroColors.primary),
+                          : (_state == AgentState.speaking
+                              ? Colors.orange
+                              : (_isMicActive
+                                  ? Colors.redAccent
+                                  : NeuroColors.primary)),
                       shape: BoxShape.circle,
                       boxShadow: _isMicActive
                           ? [
@@ -700,11 +743,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     child: Icon(
                       !_isConnected
                           ? Icons.mic_off
-                          : (_isMicActive
-                              ? Icons.stop
-                              : (_state == AgentState.thinking
-                                  ? Icons.hourglass_empty
-                                  : Icons.mic)),
+                          : (_state == AgentState.speaking
+                              ? Icons.volume_up
+                              : (_isMicActive
+                                  ? Icons.stop
+                                  : (_state == AgentState.thinking
+                                      ? Icons.hourglass_empty
+                                      : Icons.mic))),
                       size: 40,
                       color: Colors.white,
                     ),
@@ -714,9 +759,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 Text(
                   !_isConnected
                       ? 'Not connected'
-                      : (_isMicActive
-                          ? 'Recording... tap again to send'
-                          : 'Tap once to record, tap again to send'),
+                      : (_state == AgentState.speaking
+                          ? 'AI is speaking...'
+                          : (_isMicActive
+                              ? 'Recording... tap again to send'
+                              : 'Tap once to record, tap again to send')),
                   style: const TextStyle(
                     color: NeuroColors.textSecondary,
                     fontSize: 12,
