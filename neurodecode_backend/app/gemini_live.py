@@ -86,6 +86,12 @@ class GeminiLiveSession:
         blob = types.Blob(data=audio_bytes, mime_type=mime_type)
         await self._session.send_realtime_input(audio=blob)
 
+    async def send_audio_stream_end(self) -> None:
+        if self._session is None:
+            raise RuntimeError("Live session not started")
+
+        await self._session.send_realtime_input(audio_stream_end=True)
+
     async def send_text(self, text: str, end_of_turn: bool = True) -> None:
         if self._session is None:
             raise RuntimeError("Live session not started")

@@ -45,9 +45,22 @@ SYSTEM_INSTRUCTION = (
     "if they speak Indonesian, reply in natural Indonesian; if they speak English, "
     "reply in English. Prefer spoken responses that are 1-2 short sentences unless "
     "more detail is clearly needed. Do not give a long self-introduction or repeat "
-    "your role unless the caregiver asks. At session start, stay quiet until the "
-    "caregiver speaks or an observer note creates a clear reason to respond."
+    "your role unless the caregiver asks. Never say the phrases [Visual Observer Note], "
+    "[Audio Observer Note], INTERNAL SENSOR NOTE, or quote private sensor notes verbatim. "
+    "At session start, stay quiet until the caregiver speaks or an observer note creates a "
+    "clear reason to respond."
 )
+
+
+def _looks_like_internal_note(text: str) -> bool:
+    normalized = text.strip().lower()
+    markers = (
+        "[visual observer note]",
+        "[audio observer note]",
+        "internal sensor note",
+        "private context",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def _truncate_items(items: list[str], max_items: int = 14) -> list[str]:
@@ -60,26 +73,36 @@ def _build_summary_prompt(
     *,
     duration_seconds: int,
     close_reason: str,
-    observer_notes: list[str],
+    observer_visual_notes: list[str],
+    observer_audio_notes: list[str],
     transcript_in: list[str],
     transcript_out: list[str],
 ) -> str:
-    clipped_observer_notes = _truncate_items(observer_notes, 18)
+    clipped_visual = _truncate_items(observer_visual_notes, 10)
+    clipped_audio = _truncate_items(observer_audio_notes, 10)
     clipped_in = _truncate_items(transcript_in, 10)
     clipped_out = _truncate_items(transcript_out, 10)
 
     return (
         "You are producing a post-crisis caregiver report for an autism support session. "
-        "Use concise, practical, non-diagnostic language.\n\n"
+        "Use concise, practical, non-diagnostic language. Use only evidence found in the "
+        "provided observer notes and transcripts. Do not invent triggers or contradict the "
+        "evidence. Visual Observer Notes come ONLY from the camera sensor — use them ONLY "
+        "for TRIGGERS_VISUAL. Audio Observer Notes come ONLY from the microphone sensor — "
+        "use them ONLY for TRIGGERS_AUDIO. NEVER attribute an audio observation as a visual "
+        "trigger or vice versa. If a list is empty, state that no trigger was detected for "
+        "that modality. Never quote internal note labels such as [Visual Observer Note] or "
+        "[Audio Observer Note] verbatim in the output.\n\n"
         "Output MUST follow this exact structure:\n"
         "TITLE: <short title>\n"
-        "TRIGGERS_VISUAL: <1 sentence>\n"
-        "TRIGGERS_AUDIO: <1 sentence>\n"
+        "TRIGGERS_VISUAL: <1 sentence based ONLY on Visual Observer Notes below>\n"
+        "TRIGGERS_AUDIO: <1 sentence based ONLY on Audio Observer Notes below>\n"
         "AGENT_ACTIONS: <1-2 sentences>\n"
         "FOLLOW_UP: <1-2 sentences>\n"
         "SAFETY_NOTE: <1 sentence>\n\n"
         f"Session metadata:\n- Duration seconds: {duration_seconds}\n- Close reason: {close_reason}\n\n"
-        f"Observer notes:\n{json.dumps(clipped_observer_notes, ensure_ascii=True)}\n\n"
+        f"Visual Observer Notes (camera/movement detection only):\n{json.dumps(clipped_visual, ensure_ascii=True)}\n\n"
+        f"Audio Observer Notes (microphone/vocal detection only):\n{json.dumps(clipped_audio, ensure_ascii=True)}\n\n"
         f"Caregiver/user transcript excerpts:\n{json.dumps(clipped_in, ensure_ascii=True)}\n\n"
         f"Agent transcript excerpts:\n{json.dumps(clipped_out, ensure_ascii=True)}\n"
     )
@@ -90,14 +113,16 @@ def generate_session_summary(
     model: str,
     duration_seconds: int,
     close_reason: str,
-    observer_notes: list[str],
+    observer_visual_notes: list[str],
+    observer_audio_notes: list[str],
     transcript_in: list[str],
     transcript_out: list[str],
 ) -> str:
     prompt = _build_summary_prompt(
         duration_seconds=duration_seconds,
         close_reason=close_reason,
-        observer_notes=observer_notes,
+        observer_visual_notes=observer_visual_notes,
+        observer_audio_notes=observer_audio_notes,
         transcript_in=transcript_in,
         transcript_out=transcript_out,
     )
@@ -256,26 +281,30 @@ async def ws_live(websocket: WebSocket) -> None:
         last_audio_note_ts = 0.0
         last_vision_note_ts = 0.0
         audio_observer_buffer = bytearray()
-        observer_notes_log: list[str] = []
+        observer_visual_log: list[str] = []
+        observer_audio_log: list[str] = []
         transcript_in_log: list[str] = []
         transcript_out_log: list[str] = []
+        print("[ws_live] Session started — Gemini connected")
 
         async def maybe_summarize_and_notify() -> None:
             if not settings.summary_enabled:
                 return
 
-            if not (observer_notes_log or transcript_in_log or transcript_out_log):
+            if not (observer_visual_log or observer_audio_log or transcript_in_log or transcript_out_log):
                 return
 
             duration_seconds = int(max(1, time.monotonic() - session_start))
 
             try:
+                print(f"[session_summary] Generating: visual={len(observer_visual_log)} audio={len(observer_audio_log)} in={len(transcript_in_log)} out={len(transcript_out_log)}")
                 summary = await asyncio.to_thread(
                     generate_session_summary,
                     model=settings.summary_model,
                     duration_seconds=duration_seconds,
                     close_reason=close_reason,
-                    observer_notes=list(observer_notes_log),
+                    observer_visual_notes=list(observer_visual_log),
+                    observer_audio_notes=list(observer_audio_log),
                     transcript_in=list(transcript_in_log),
                     transcript_out=list(transcript_out_log),
                 )
@@ -326,7 +355,8 @@ async def ws_live(websocket: WebSocket) -> None:
             nonlocal close_reason, last_activity
             while True:
                 await asyncio.sleep(5)
-                if time.monotonic() - last_activity > IDLE_TIMEOUT_SECONDS:
+                idle_secs = time.monotonic() - last_activity
+                if idle_secs > IDLE_TIMEOUT_SECONDS:
                     print(f"[idle_monitor] No activity for {IDLE_TIMEOUT_SECONDS}s — closing session")
                     close_reason = "idle_timeout"
                     await websocket.send_text(
@@ -342,6 +372,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 last_activity = time.monotonic()
                 msg = json.loads(raw)
                 msg_type = ensure_type(msg)
+                print(f"[client\u2192gemini] {msg_type}")
 
                 if msg_type == "audio":
                     data_b64 = msg.get("data_b64")
@@ -362,7 +393,8 @@ async def ws_live(websocket: WebSocket) -> None:
                         audio_observer_buffer.clear()
                         note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
                         if note:
-                            observer_notes_log.append(note)
+                            print(f"[observer] Audio note triggered")
+                            observer_audio_log.append(note)
                             await session.send_observer_note(note)
                             last_audio_note_ts = now
                 elif msg_type == "text":
@@ -373,6 +405,9 @@ async def ws_live(websocket: WebSocket) -> None:
                     if text.strip():
                         transcript_in_log.append(text.strip())
                     await session.send_text(text, bool(end_of_turn))
+                elif msg_type == "audio_stream_end":
+                    print("[client\u2192gemini] audio_stream_end sent to Gemini")
+                    await session.send_audio_stream_end()
                 elif msg_type == "image":
                     data_b64 = msg.get("data_b64")
                     mime_type = msg.get("mime_type") or "image/jpeg"
@@ -383,7 +418,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     if (now - last_vision_note_ts) >= VISION_OBSERVER_COOLDOWN_SECONDS:
                         note = await asyncio.to_thread(ai_engine.process_vision_frame, data_b64)
                         if note:
-                            observer_notes_log.append(note)
+                            print(f"[observer] Visual note triggered")
+                            observer_visual_log.append(note)
                             await session.send_observer_note(note)
                             last_vision_note_ts = now
 
@@ -394,7 +430,10 @@ async def ws_live(websocket: WebSocket) -> None:
                     if not isinstance(text, str):
                         raise ValueError("observer_note.text must be a string")
                     if text.strip():
-                        observer_notes_log.append(text.strip())
+                        if "[audio" in text.strip().lower():
+                            observer_audio_log.append(text.strip())
+                        else:
+                            observer_visual_log.append(text.strip())
                     await session.send_observer_note(text)
                 elif msg_type == "close":
                     close_reason = "client_close"
@@ -405,6 +444,7 @@ async def ws_live(websocket: WebSocket) -> None:
         async def pump_gemini_to_client() -> None:
             nonlocal last_activity
             async for out in session.receive():
+                print(f"[gemini\u2192client] {out.type}")
                 if out.type == "model_audio" and out.data:
                     last_activity = time.monotonic()
                     await websocket.send_text(
@@ -418,6 +458,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     )
                 elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                     if out.text:
+                        if out.type in {"model_text", "transcript_out"} and _looks_like_internal_note(out.text):
+                            continue
                         last_activity = time.monotonic()
                         if out.type == "transcript_in":
                             transcript_in_log.append(out.text.strip())
@@ -430,12 +472,15 @@ async def ws_live(websocket: WebSocket) -> None:
                         )
                 elif out.type == "model_audio_end":
                     last_activity = time.monotonic()
+                    print("[gemini\u2192client] model_audio_end \u2014 turn complete")
                     await websocket.send_text(json.dumps({"type": "model_audio_end"}))
                 elif out.type == "interrupted":
                     last_activity = time.monotonic()
+                    print("[gemini\u2192client] interrupted")
                     await websocket.send_text(json.dumps({"type": "interrupted"}))
 
         try:
+            print("[ws_live] Starting pump tasks")
             client_task = asyncio.create_task(pump_client_to_gemini())
             gemini_task = asyncio.create_task(pump_gemini_to_client())
             idle_task = asyncio.create_task(idle_monitor())
@@ -445,6 +490,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
+            print(f"[ws_live] Task completed: done={len(done)} pending={len(pending)}")
             for task in pending:
                 task.cancel()
 
@@ -452,6 +498,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 exc = task.exception()
                 if exc is None:
                     continue
+                print(f"[ws_live] Task exception: {exc}")
                 if isinstance(exc, WebSocketDisconnect):
                     close_reason = "client_disconnect"
                     return
@@ -459,11 +506,14 @@ async def ws_live(websocket: WebSocket) -> None:
 
         except WebSocketDisconnect:
             close_reason = "client_disconnect"
+            print("[ws_live] Client disconnected")
             return
         except Exception as e:
             close_reason = "error"
+            print(f"[ws_live] Error: {e}")
             await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
         finally:
             if close_reason == "unknown":
                 close_reason = "completed"
+            print(f"[ws_live] Session ending: close_reason={close_reason}")
             await maybe_summarize_and_notify()

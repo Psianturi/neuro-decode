@@ -31,6 +31,9 @@ class LiveAgentScreen extends StatefulWidget {
 }
 
 class _LiveAgentScreenState extends State<LiveAgentScreen> {
+  static const int _geminiOutputSampleRate = 24000;
+  static const int _geminiOutputChannels = 1;
+
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSub;
   AgentState _state = AgentState.idle;
@@ -44,10 +47,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
   static const int _playerBufferSize = 4096;
+  int _playerSampleRate = _geminiOutputSampleRate;
   CameraController? _cameraController;
   Timer? _visionTimer;
   bool _isCapturingFrame = false;
   bool _isCleaningUp = false;
+  bool _isManualClose = false;
 
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
@@ -109,6 +114,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _channel != null && _wsSub != null && _state != AgentState.error;
 
   void _setStateLabel(AgentState next) {
+    _logDebug('state_change', '$_state \u2192 $next');
     if (!mounted) return;
     setState(() {
       _state = next;
@@ -117,24 +123,41 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   void _connect() {
     if (_isConnected) return;
+    _isManualClose = false;
     _setStateLabel(AgentState.connecting);
     _logDebug('ws_event', 'connecting ${AppConfig.wsEndpoint}');
     try {
       _channel = WebSocketChannel.connect(Uri.parse(AppConfig.wsEndpoint));
       _wsSub = _channel!.stream.listen(
         _onMessageReceived,
-        onDone: () => _handleSocketClosed(manual: false),
+        onDone: () {
+          _logDebug('ws_event', 'connection closed (onDone)');
+          _handleSocketClosed(manual: false);
+          if (!_isManualClose && mounted) {
+            _logDebug('ws_event', 'auto-reconnecting in 3s...');
+            _addLog('System', 'Connection lost. Reconnecting...');
+            Future.delayed(const Duration(seconds: 3), () {
+              if (mounted && !_isConnected && !_isManualClose) _connect();
+            });
+          }
+        },
         onError: (error) {
           _setStateLabel(AgentState.error);
           _addLog('Error', 'Connection error: $error');
           _logDebug('ws_event', 'error: $error');
           _handleSocketClosed(manual: false);
+          if (!_isManualClose && mounted) {
+            _logDebug('ws_event', 'auto-reconnecting in 3s...');
+            Future.delayed(const Duration(seconds: 3), () {
+              if (mounted && !_isConnected && !_isManualClose) _connect();
+            });
+          }
         },
       );
 
       if (!mounted) return;
       _setStateLabel(AgentState.idle);
-      _addLog('System', 'Establishing secure connection...');
+      _addLog('System', 'Connected to NeuroDecode agent.');
       _logDebug('ws_event', 'connected');
     } catch (e) {
       _setStateLabel(AgentState.error);
@@ -144,6 +167,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _disconnect() {
+    _isManualClose = true;
     _stopVisionLoop();
     _handleSocketClosed(manual: true);
   }
@@ -160,6 +184,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _onMessageReceived(dynamic message) {
+    try {
     final data = jsonDecode(message as String);
     final type = data['type'];
     _logDebug('ws_event', 'message type=$type');
@@ -198,6 +223,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _setStateLabel(AgentState.speaking);
       _geminiTurnComplete = false;
       final b64 = (data['data_b64'] ?? '').toString();
+      final mimeType = (data['mime_type'] ?? '').toString();
+      final nextSampleRate = _sampleRateFromMimeType(mimeType) ?? _geminiOutputSampleRate;
+      if (nextSampleRate != _playerSampleRate) {
+        _playerSampleRate = nextSampleRate;
+        _stopPlayerStreamNow();
+        _logDebug('player_event', 'sample rate updated to ${_playerSampleRate}Hz');
+      }
       if (b64.isNotEmpty) {
         _feedAudio(Uint8List.fromList(base64Decode(b64)));
       }
@@ -205,6 +237,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     }
 
     if (type == 'model_audio_end') {
+      _logDebug('audio_end', 'turn complete, delaying 600ms for buffer drain');
       _geminiTurnComplete = true;
       _seenTranscriptOutInCurrentTurn = false;
       _lastGeminiChunkAt = null;
@@ -242,6 +275,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         );
       }
     }
+    } catch (e, stackTrace) {
+      _logDebug('ws_event', 'ERROR processing message: $e');
+      _addLog('Error', 'Failed to process message: $e');
+    }
   }
 
   void _addObserverEvent({
@@ -264,6 +301,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _toggleMic() async {
+    _logDebug('mic_toggle', 'START: mic=$_isMicActive state=$_state connected=$_isConnected');
     if (!_isConnected) {
       _addLog('System', 'Agent is not connected yet. Reconnecting...');
       if (mounted) {
@@ -274,17 +312,27 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _connect();
       return;
     }
+
+    // Guard: prevent toggle while AI is thinking
+    if (!_isMicActive && _state == AgentState.thinking) {
+      _logDebug('mic_toggle', 'BLOCKED: AI is thinking');
+      return;
+    }
+
     if (_isMicActive) {
+      _logDebug('mic_toggle', 'STOPPING mic stream');
       await _stopMicStream();
     } else {
-      //stop Gemini audio if it's speaking when user starts talking
+      // Barge-in: stop Gemini audio if it's speaking when user starts talking
       if (_state == AgentState.speaking) {
         _stopPlayerStreamNow();
         _geminiTurnComplete = true;
         _logDebug('barge_in', 'user interrupted Gemini, audio stopped');
       }
+      _logDebug('mic_toggle', 'STARTING mic stream');
       await _startMicStream();
     }
+    _logDebug('mic_toggle', 'END: mic=$_isMicActive state=$_state');
   }
 
   // ── Vision Loop: periodic camera frame capture ──
@@ -382,13 +430,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _channel!.sink.add(
         jsonEncode(
           {
-            'type': 'text',
-            'text': '',
-            'end_of_turn': true,
+            'type': 'audio_stream_end',
           },
         ),
       );
-      _logDebug('turn_event', 'commit sent end_of_turn=true');
+      _logDebug('turn_event', 'audio_stream_end sent');
     }
 
     if (mounted) {
@@ -414,14 +460,17 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       await _soundPlayer.startPlayerFromStream(
         codec: Codec.pcm16,
         interleaved: true,
-        sampleRate: 24000,
-        numChannels: 1,
+        sampleRate: _playerSampleRate,
+        numChannels: _geminiOutputChannels,
         bufferSize: _playerBufferSize,
       );
       _isPlayerStreamOpen = true;
-      _logDebug('player_event', 'PCM stream opened at 24kHz');
+      _logDebug(
+        'player_event',
+        'PCM stream opened at ${_playerSampleRate}Hz (channels: $_geminiOutputChannels, codec: pcm16)',
+      );
     }
-    await _soundPlayer.feedFromStream(pcm);
+    await _soundPlayer.feedUint8FromStream(pcm);
   }
 
   void _closePlayerStream() {
@@ -450,6 +499,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _debugLog.removeRange(0, _debugLog.length - 200);
       }
     });
+  }
+
+  int? _sampleRateFromMimeType(String mimeType) {
+    final match = RegExp(r'rate=(\d+)', caseSensitive: false).firstMatch(mimeType);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
   }
 
   void _appendGeminiChunk(String chunk) {
@@ -567,18 +622,104 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     }
   }
 
+  Color _getStateColor(AgentState state) {
+    switch (state) {
+      case AgentState.connecting:
+        return Colors.orange;
+      case AgentState.listening:
+        return Colors.blue;
+      case AgentState.thinking:
+        return Colors.purple;
+      case AgentState.speaking:
+        return Colors.green;
+      case AgentState.error:
+        return Colors.red;
+      case AgentState.idle:
+        return Colors.grey;
+    }
+  }
+
+  void _openDebugLog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Debug Log'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: ListView.builder(
+            itemCount: _debugLog.length,
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
+              child: Text(
+                _debugLog[i],
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _debugLog.clear());
+              Navigator.pop(ctx);
+            },
+            child: const Text('Clear'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Live Session • $_stateLabel'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Live Session'),
+            Text(
+              _stateLabel,
+              style: TextStyle(
+                fontSize: 12,
+                color: _getStateColor(_state),
+              ),
+            ),
+          ],
+        ),
         actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: _isConnected ? Colors.green : Colors.red,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _isConnected ? 'Live' : 'Offline',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
           if (widget.observerEnabled)
             IconButton(
               onPressed: _openObserverPanel,
               icon: const Icon(Icons.insights),
               tooltip: 'Observer Panel',
             ),
+          IconButton(
+            onPressed: _openDebugLog,
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Debug Log',
+          ),
         ],
       ),
       body: Stack(
@@ -682,11 +823,17 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
             right: 0,
             child: Column(
               children: [
-                // ── Mic button: only active when connected ──
+                // ── Mic button: only active when connected & not thinking ──
                 GestureDetector(
-                  onTap: (_isConnected && _state != AgentState.speaking)
+                  onTap: (_isConnected &&
+                          _state != AgentState.speaking &&
+                          _state != AgentState.thinking)
                       ? _toggleMic
-                      : null,
+                      : (_isConnected &&
+                              _state == AgentState.speaking &&
+                              _isMicActive == false)
+                          ? null
+                          : (_isMicActive ? _toggleMic : null),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.all(20),
@@ -697,12 +844,14 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                               ? Colors.orange
                               : (_isMicActive
                                   ? Colors.redAccent
-                                  : NeuroColors.primary)),
+                                  : (_state == AgentState.thinking
+                                      ? Colors.purple
+                                      : NeuroColors.primary))),
                       shape: BoxShape.circle,
                       boxShadow: _isMicActive
                           ? [
-                              const BoxShadow(
-                                color: Colors.red,
+                              BoxShadow(
+                                color: Colors.red.withValues(alpha: 0.5),
                                 blurRadius: 20,
                                 spreadRadius: 5,
                               ),
@@ -729,17 +878,19 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                   !_isConnected
                       ? 'Not connected'
                       : (_state == AgentState.speaking
-                          ? 'AI is speaking...'
+                          ? 'AI is speaking... wait to finish'
                           : (_isMicActive
-                              ? 'Recording... tap again to send'
-                              : 'Tap once to record, tap again to send')),
+                              ? 'Recording \u2022 Tap \u25A0 to send'
+                              : (_state == AgentState.thinking
+                                  ? 'AI is thinking... please wait'
+                                  : 'Tap mic to record, then tap \u25A0 to send'))),
                   style: const TextStyle(
                     color: NeuroColors.textSecondary,
                     fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 12),
-   
+
                 SizedBox(
                   width: 220,
                   height: 48,

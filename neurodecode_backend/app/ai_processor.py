@@ -80,6 +80,7 @@ class NeuroDecodeAI:
             features = self._audio_extractor.predict(input_data, verbose=0)
             raw_score = float(np.mean(np.abs(features[0])))
             distress_score = self._sigmoid(raw_score)
+            print(f"[AI Engine] Audio: raw={raw_score:.4f} sigmoid={distress_score:.4f} threshold=0.68")
 
             if distress_score > 0.68:
                 return (
@@ -129,6 +130,7 @@ class NeuroDecodeAI:
             behavior_features = self._video_extractor.predict(model_input, verbose=0)
             raw_score = float(np.max(np.abs(behavior_features[0])))
             stimming_confidence = self._sigmoid(raw_score)
+            print(f"[AI Engine] Vision: raw={raw_score:.4f} sigmoid={stimming_confidence:.4f} threshold=0.7")
 
             if stimming_confidence > 0.7:
                 return (
