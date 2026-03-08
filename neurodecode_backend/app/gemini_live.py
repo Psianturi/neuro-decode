@@ -16,6 +16,21 @@ class LiveOut:
     mime_type: str | None = None
 
 
+def _is_unsupported_live_input_error(error: Exception) -> bool:
+    message = str(error).lower()
+    markers = (
+        "not supported",
+        "unsupported",
+        "unexpected keyword",
+        "unexpected argument",
+        "extra inputs are not permitted",
+        "extra_forbidden",
+        "no parameter named",
+        "has no attribute",
+    )
+    return any(marker in message for marker in markers)
+
+
 class GeminiLiveSession:
     """Thin wrapper around google-genai Live API session.
 
@@ -87,10 +102,32 @@ class GeminiLiveSession:
         await self._session.send_realtime_input(audio=blob)
 
     async def send_audio_stream_end(self) -> None:
+        """Signal end of audio stream to trigger Gemini response."""
         if self._session is None:
             raise RuntimeError("Live session not started")
 
-        await self._session.send_realtime_input(audio_stream_end=True)
+        try:
+            await self._session.send_realtime_input(audio_stream_end=True)
+            print("[gemini_live] audio_stream_end sent successfully")
+        except (TypeError, AttributeError, ValueError) as e:
+            if not _is_unsupported_live_input_error(e):
+                raise
+            # Fallback to activity_end if audio_stream_end is not supported (e.g., Vertex AI mode)
+            print(f"[gemini_live] audio_stream_end not supported, trying activity_end fallback: {e}")
+            try:
+                # Try using ActivityEnd enum if available
+                await self._session.send_realtime_input(activity_end=types.ActivityEnd())
+                print("[gemini_live] activity_end sent successfully")
+            except (AttributeError, TypeError, ValueError) as e2:
+                if not _is_unsupported_live_input_error(e2):
+                    raise
+                # Final fallback: send empty text with end_of_turn=True (last resort)
+                print(f"[gemini_live] activity_end not supported, using text fallback: {e2}")
+                await self._session.send_client_content(
+                    turns={"role": "user", "parts": [{"text": ""}]},
+                    turn_complete=True,
+                )
+                print("[gemini_live] text fallback sent successfully")
 
     async def send_text(self, text: str, end_of_turn: bool = True) -> None:
         if self._session is None:
