@@ -50,6 +50,11 @@ class GeminiLiveSession:
             "system_instruction": self._system_instruction,
         }
 
+        # Disable thinking for AUDIO modality to prevent chain-of-thought
+        # text from leaking through model_turn parts.
+        if self._response_modality.upper() == "AUDIO":
+            config["thinking_config"] = {"thinking_budget": 0}
+
         if self._voice_name:
             config["speech_config"] = {
                 "voice_config": {"prebuilt_voice_config": {"voice_name": self._voice_name}}

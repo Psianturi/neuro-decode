@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_sound/flutter_sound.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -38,19 +38,16 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micStreamSub;
   bool _isMicActive = false;
-  final AudioPlayer _player = AudioPlayer();
+  final FlutterSoundPlayer _soundPlayer = FlutterSoundPlayer();
+  bool _isPlayerReady = false;
+  bool _isPlayerStreamOpen = false;
+  bool _geminiTurnComplete = true;
+  Future<void>? _feedChain;
+  static const int _playerBufferSize = 4096;
   CameraController? _cameraController;
   Timer? _visionTimer;
   bool _isCapturingFrame = false;
   bool _isCleaningUp = false;
-
-  // ── Progressive audio chunk queue ──
-  final BytesBuilder _streamAudioBuffer = BytesBuilder(copy: false);
-  final List<Uint8List> _audioPlayQueue = [];
-  bool _isPlayingQueue = false;
-  bool _geminiTurnComplete = true;
-  StreamSubscription<void>? _playerCompleteSub;
-  static const int _audioChunkThreshold = 12000; // ~0.25s at 24kHz 16-bit mono
 
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
@@ -63,12 +60,16 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   @override
   void initState() {
     super.initState();
-    _playerCompleteSub = _player.onPlayerComplete.listen((_) {
-      _playNextChunk();
-    });
+    _initSoundPlayer();
     _checkPermissions();
     _initCamera();
     _connect();
+  }
+
+  Future<void> _initSoundPlayer() async {
+    await _soundPlayer.openPlayer();
+    _isPlayerReady = true;
+    _logDebug('player_event', 'FlutterSoundPlayer opened');
   }
 
   Future<void> _checkPermissions() async {
@@ -198,34 +199,30 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _geminiTurnComplete = false;
       final b64 = (data['data_b64'] ?? '').toString();
       if (b64.isNotEmpty) {
-        _streamAudioBuffer.add(base64Decode(b64));
-        if (_streamAudioBuffer.length >= _audioChunkThreshold) {
-          _flushAudioBufferToQueue();
-        }
+        _feedAudio(Uint8List.fromList(base64Decode(b64)));
       }
       return;
     }
 
     if (type == 'model_audio_end') {
       _geminiTurnComplete = true;
-      _flushAudioBufferToQueue();
       _seenTranscriptOutInCurrentTurn = false;
       _lastGeminiChunkAt = null;
-      // State transitions to idle when the audio queue drains
-      if (!_isPlayingQueue) {
-        _setStateLabel(AgentState.idle);
-      }
+      // Delay state change so OS audio buffer can drain
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted && _geminiTurnComplete) {
+          _closePlayerStream();
+          _setStateLabel(AgentState.idle);
+        }
+      });
       return;
     }
 
     if (type == 'interrupted') {
-      _streamAudioBuffer.takeBytes(); 
-      _audioPlayQueue.clear();
-      _player.stop();
-      _isPlayingQueue = false;
+      _stopPlayerStreamNow();
       _geminiTurnComplete = true;
       _addLog('System', 'Gemini response interrupted.');
-      _logDebug('player_event', 'interrupted, stop');
+      _logDebug('player_event', 'interrupted, stream stopped');
       _setStateLabel(AgentState.idle);
       return;
     }
@@ -282,8 +279,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     } else {
       //stop Gemini audio if it's speaking when user starts talking
       if (_state == AgentState.speaking) {
-        _currentTurnAudioBuffer.clear();
-        await _player.stop();
+        _stopPlayerStreamNow();
+        _geminiTurnComplete = true;
         _logDebug('barge_in', 'user interrupted Gemini, audio stopped');
       }
       await _startMicStream();
@@ -402,36 +399,46 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _setStateLabel(AgentState.thinking);
   }
 
-  void _flushAudioBufferToQueue() {
-    final pcmBytes = _streamAudioBuffer.takeBytes();
-    if (pcmBytes.isEmpty) return;
+  // ── PCM streaming audio playback (pipe-to-speaker) ──
 
-    final wavBytes = _pcm16ToWav(
-      pcm: Uint8List.fromList(pcmBytes),
-      sampleRate: 24000,
-      channels: 1,
-      bitsPerSample: 16,
-    );
-    _audioPlayQueue.add(wavBytes);
-    if (!_isPlayingQueue) {
-      _playNextChunk();
+  void _feedAudio(Uint8List pcm) {
+    // Chain feed operations to ensure sequential execution.
+    _feedChain = (_feedChain ?? Future.value())
+        .then((_) => _doFeedAudio(pcm))
+        .catchError((e) => _logDebug('player_event', 'feed error: $e'));
+  }
+
+  Future<void> _doFeedAudio(Uint8List pcm) async {
+    if (!_isPlayerReady) return;
+    if (!_isPlayerStreamOpen) {
+      await _soundPlayer.startPlayerFromStream(
+        codec: Codec.pcm16,
+        interleaved: true,
+        sampleRate: 24000,
+        numChannels: 1,
+        bufferSize: _playerBufferSize,
+      );
+      _isPlayerStreamOpen = true;
+      _logDebug('player_event', 'PCM stream opened at 24kHz');
+    }
+    await _soundPlayer.feedFromStream(pcm);
+  }
+
+  void _closePlayerStream() {
+    if (_isPlayerStreamOpen) {
+      _soundPlayer.stopPlayer();
+      _isPlayerStreamOpen = false;
+      _feedChain = null;
+      _logDebug('player_event', 'PCM stream closed');
     }
   }
 
-  Future<void> _playNextChunk() async {
-    if (_audioPlayQueue.isEmpty) {
-      _isPlayingQueue = false;
-      if (_geminiTurnComplete) {
-        _setStateLabel(AgentState.idle);
-      }
-      return;
+  void _stopPlayerStreamNow() {
+    if (_isPlayerStreamOpen) {
+      _soundPlayer.stopPlayer();
+      _isPlayerStreamOpen = false;
+      _feedChain = null;
     }
-    _isPlayingQueue = true;
-    final wav = _audioPlayQueue.removeAt(0);
-    _logDebug('player_event',
-        'playing chunk (${wav.length} bytes, ${_audioPlayQueue.length} queued)');
-    await _player.stop();
-    await _player.play(BytesSource(wav));
   }
 
   void _logDebug(String tag, String msg) {
@@ -443,38 +450,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _debugLog.removeRange(0, _debugLog.length - 200);
       }
     });
-  }
-
-  Uint8List _pcm16ToWav({
-    required Uint8List pcm,
-    required int sampleRate,
-    required int channels,
-    required int bitsPerSample,
-  }) {
-    final byteRate = sampleRate * channels * (bitsPerSample ~/ 8);
-    final blockAlign = channels * (bitsPerSample ~/ 8);
-    final dataLength = pcm.length;
-    final totalLength = 44 + dataLength;
-
-    final out = Uint8List(totalLength);
-    final bd = ByteData.sublistView(out);
-
-    out.setAll(0, ascii.encode('RIFF'));
-    bd.setUint32(4, totalLength - 8, Endian.little);
-    out.setAll(8, ascii.encode('WAVE'));
-    out.setAll(12, ascii.encode('fmt '));
-    bd.setUint32(16, 16, Endian.little);
-    bd.setUint16(20, 1, Endian.little);
-    bd.setUint16(22, channels, Endian.little);
-    bd.setUint32(24, sampleRate, Endian.little);
-    bd.setUint32(28, byteRate, Endian.little);
-    bd.setUint16(32, blockAlign, Endian.little);
-    bd.setUint16(34, bitsPerSample, Endian.little);
-    out.setAll(36, ascii.encode('data'));
-    bd.setUint32(40, dataLength, Endian.little);
-    out.setAll(44, pcm);
-
-    return out;
   }
 
   void _appendGeminiChunk(String chunk) {
@@ -543,13 +518,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _channel = null;
     ch?.sink.close();
 
-    _streamAudioBuffer.takeBytes();
-    _audioPlayQueue.clear();
-    _isPlayingQueue = false;
+    _stopPlayerStreamNow();
     _geminiTurnComplete = true;
     _seenTranscriptOutInCurrentTurn = false;
     _lastGeminiChunkAt = null;
-    _player.stop();
 
     if (mounted) {
       _setStateLabel(AgentState.idle);
@@ -570,14 +542,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _wsSub = null;
     _channel?.sink.close();
     _channel = null;
-    _streamAudioBuffer.takeBytes();
-    _audioPlayQueue.clear();
-    _playerCompleteSub?.cancel();
-    _player.stop();
+    _stopPlayerStreamNow();
+    _soundPlayer.closePlayer();
     _scrollController.dispose();
     _cameraController?.dispose();
     _recorder.dispose();
-    _player.dispose();
     super.dispose();
   }
 
