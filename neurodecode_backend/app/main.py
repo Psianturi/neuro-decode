@@ -285,7 +285,33 @@ async def ws_live(websocket: WebSocket) -> None:
         observer_audio_log: list[str] = []
         transcript_in_log: list[str] = []
         transcript_out_log: list[str] = []
+        audio_observer_task: asyncio.Task[None] | None = None
+        vision_observer_task: asyncio.Task[None] | None = None
         print("[ws_live] Session started — Gemini connected")
+
+        async def run_audio_observer(observer_audio: bytes) -> None:
+            try:
+                note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
+                if note:
+                    print(f"[observer] Audio note triggered")
+                    observer_audio_log.append(note)
+                    await session.send_observer_note(note)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"[observer] Audio observer error: {e}")
+
+        async def run_vision_observer(frame_b64: str) -> None:
+            try:
+                note = await asyncio.to_thread(ai_engine.process_vision_frame, frame_b64)
+                if note:
+                    print(f"[observer] Visual note triggered")
+                    observer_visual_log.append(note)
+                    await session.send_observer_note(note)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"[observer] Vision observer error: {e}")
 
         async def maybe_summarize_and_notify() -> None:
             if not settings.summary_enabled:
@@ -391,12 +417,9 @@ async def ws_live(websocket: WebSocket) -> None:
                     ):
                         observer_audio = bytes(audio_observer_buffer)
                         audio_observer_buffer.clear()
-                        note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
-                        if note:
-                            print(f"[observer] Audio note triggered")
-                            observer_audio_log.append(note)
-                            await session.send_observer_note(note)
-                            last_audio_note_ts = now
+                        last_audio_note_ts = now
+                        if audio_observer_task is None or audio_observer_task.done():
+                            audio_observer_task = asyncio.create_task(run_audio_observer(observer_audio))
                 elif msg_type == "text":
                     text = msg.get("text")
                     end_of_turn = msg.get("end_of_turn", True)
@@ -416,12 +439,9 @@ async def ws_live(websocket: WebSocket) -> None:
 
                     now = time.monotonic()
                     if (now - last_vision_note_ts) >= VISION_OBSERVER_COOLDOWN_SECONDS:
-                        note = await asyncio.to_thread(ai_engine.process_vision_frame, data_b64)
-                        if note:
-                            print(f"[observer] Visual note triggered")
-                            observer_visual_log.append(note)
-                            await session.send_observer_note(note)
-                            last_vision_note_ts = now
+                        last_vision_note_ts = now
+                        if vision_observer_task is None or vision_observer_task.done():
+                            vision_observer_task = asyncio.create_task(run_vision_observer(data_b64))
 
                     image_bytes = b64_decode(data_b64)
                     await session.send_image(image_bytes, mime_type)
@@ -513,6 +533,17 @@ async def ws_live(websocket: WebSocket) -> None:
             print(f"[ws_live] Error: {e}")
             await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
         finally:
+            for observer_task in (audio_observer_task, vision_observer_task):
+                if observer_task is None or observer_task.done():
+                    continue
+                observer_task.cancel()
+                try:
+                    await observer_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"[observer] Background task shutdown error: {e}")
+
             if close_reason == "unknown":
                 close_reason = "completed"
             print(f"[ws_live] Session ending: close_reason={close_reason}")

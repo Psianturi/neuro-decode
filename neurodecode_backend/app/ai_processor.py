@@ -21,15 +21,18 @@ class NeuroDecodeAI:
         self._audio_extractor: Any | None = None
         self._vgg16_eyes: Any | None = None
         self._models_loaded = False
+        self._model_load_attempted = False
         self._lock = threading.Lock()
 
     def _lazy_load_models(self) -> None:
-        if self._models_loaded:
+        if self._models_loaded or self._model_load_attempted:
             return
 
         with self._lock:
-            if self._models_loaded:
+            if self._models_loaded or self._model_load_attempted:
                 return
+
+            self._model_load_attempted = True
 
             print("[AI Engine] Lazy loading TensorFlow + Keras models...")
             try:
@@ -55,6 +58,7 @@ class NeuroDecodeAI:
             except Exception as e:
                 # Keep serving even if model loading fails.
                 print(f"[AI Engine] Model load failed: {e}")
+                print("[AI Engine] Observer models disabled for this process after load failure")
 
     @staticmethod
     def _sigmoid(x: float) -> float:
