@@ -197,6 +197,17 @@ class GeminiLiveSession:
 
                 model_turn = getattr(server_content, "model_turn", None)
                 if model_turn and getattr(model_turn, "parts", None):
+                    for part in model_turn.parts:
+                        inline_data = getattr(part, "inline_data", None)
+                        chunk = getattr(inline_data, "data", None) if inline_data else None
+                        if isinstance(chunk, (bytes, bytearray)) and chunk:
+                            yield LiveOut(
+                                type="model_audio",
+                                data=bytes(chunk),
+                                mime_type=getattr(inline_data, "mime_type", None)
+                                or "audio/pcm;rate=24000",
+                            )
+
                     # In AUDIO modality the model_turn text is internal
                     # chain-of-thought / thinking — never forward it. Only yield model_text when response modality is TEXT.
                     if self._response_modality.upper() != "AUDIO":
