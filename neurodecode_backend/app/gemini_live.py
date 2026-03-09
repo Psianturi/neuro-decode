@@ -31,6 +31,42 @@ def _is_unsupported_live_input_error(error: Exception) -> bool:
     return any(marker in message for marker in markers)
 
 
+def _summarize_live_message(msg: Any) -> str:
+    server_content = getattr(msg, "server_content", None)
+    tool_call = getattr(msg, "tool_call", None)
+    vad_signal = getattr(msg, "voice_activity_detection_signal", None)
+    direct_data = getattr(msg, "data", None)
+
+    parts_summary: list[str] = []
+    model_turn = getattr(server_content, "model_turn", None) if server_content else None
+    for part in getattr(model_turn, "parts", None) or []:
+        labels: list[str] = []
+        text = getattr(part, "text", None)
+        if isinstance(text, str) and text.strip():
+            labels.append(f"text:{len(text.strip())}")
+        inline_data = getattr(part, "inline_data", None)
+        inline_bytes = getattr(inline_data, "data", None) if inline_data else None
+        if isinstance(inline_bytes, (bytes, bytearray)) and inline_bytes:
+            labels.append(
+                f"inline:{getattr(inline_data, 'mime_type', 'unknown')}:{len(inline_bytes)}"
+            )
+        if not labels:
+            labels.append("empty")
+        parts_summary.append("+".join(labels))
+
+    return (
+        f"server_content={server_content is not None} "
+        f"turn_complete={getattr(server_content, 'turn_complete', None)} "
+        f"interrupted={getattr(server_content, 'interrupted', None)} "
+        f"input_tx={getattr(getattr(server_content, 'input_transcription', None), 'text', None)!r} "
+        f"output_tx={getattr(getattr(server_content, 'output_transcription', None), 'text', None)!r} "
+        f"direct_data={len(direct_data) if isinstance(direct_data, (bytes, bytearray)) else 0} "
+        f"parts={parts_summary} "
+        f"tool_call={tool_call is not None} "
+        f"vad={getattr(vad_signal, 'vad_signal_type', None)}"
+    )
+
+
 class GeminiLiveSession:
     """Thin wrapper around google-genai Live API session.
 
@@ -102,27 +138,24 @@ class GeminiLiveSession:
         await self._session.send_realtime_input(audio=blob)
 
     async def send_audio_stream_end(self) -> None:
-        """Signal end of audio stream to trigger Gemini response."""
+        """Signal push-to-talk turn completion to Gemini Live."""
         if self._session is None:
             raise RuntimeError("Live session not started")
 
         try:
-            await self._session.send_realtime_input(audio_stream_end=True)
-            print("[gemini_live] audio_stream_end sent successfully")
+            await self._session.send_realtime_input(activity_end=types.ActivityEnd())
+            print("[gemini_live] activity_end sent successfully")
         except (TypeError, AttributeError, ValueError) as e:
             if not _is_unsupported_live_input_error(e):
                 raise
-            # Fallback to activity_end if audio_stream_end is not supported (e.g., Vertex AI mode)
-            print(f"[gemini_live] audio_stream_end not supported, trying activity_end fallback: {e}")
+            print(f"[gemini_live] activity_end not supported, trying audio_stream_end fallback: {e}")
             try:
-                # Try using ActivityEnd enum if available
-                await self._session.send_realtime_input(activity_end=types.ActivityEnd())
-                print("[gemini_live] activity_end sent successfully")
+                await self._session.send_realtime_input(audio_stream_end=True)
+                print("[gemini_live] audio_stream_end sent successfully")
             except (AttributeError, TypeError, ValueError) as e2:
                 if not _is_unsupported_live_input_error(e2):
                     raise
-                # Final fallback: send empty text with end_of_turn=True (last resort)
-                print(f"[gemini_live] activity_end not supported, using text fallback: {e2}")
+                print(f"[gemini_live] audio_stream_end not supported, using text fallback: {e2}")
                 await self._session.send_client_content(
                     turns={"role": "user", "parts": [{"text": ""}]},
                     turn_complete=True,
@@ -169,7 +202,15 @@ class GeminiLiveSession:
         if self._session is None:
             raise RuntimeError("Live session not started")
 
+        msg_count = 0
         async for msg in self._session.receive():
+            msg_count += 1
+            if msg_count <= 10 or msg_count % 50 == 0:
+                print(
+                    f"[gemini_live] RAW msg #{msg_count} type={type(msg).__name__} "
+                    f"{_summarize_live_message(msg)}"
+                )
+
             # Audio chunks (SDK convenience field)
             data = getattr(msg, "data", None)
             if isinstance(data, (bytes, bytearray)) and data:

@@ -393,12 +393,15 @@ async def ws_live(websocket: WebSocket) -> None:
 
         async def pump_client_to_gemini() -> None:
             nonlocal close_reason, last_activity, last_audio_note_ts, last_vision_note_ts, audio_observer_task, vision_observer_task
+            audio_chunk_count = 0
+            total_audio_bytes = 0
             while True:
                 raw = await websocket.receive_text()
                 last_activity = time.monotonic()
                 msg = json.loads(raw)
                 msg_type = ensure_type(msg)
-                print(f"[client\u2192gemini] {msg_type}")
+                if msg_type != "audio":
+                    print(f"[client\u2192gemini] {msg_type}")
 
                 if msg_type == "audio":
                     data_b64 = msg.get("data_b64")
@@ -406,6 +409,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     if not isinstance(data_b64, str):
                         raise ValueError("audio.data_b64 must be a string")
                     audio_bytes = b64_decode(data_b64)
+                    audio_chunk_count += 1
+                    total_audio_bytes += len(audio_bytes)
                     await session.send_audio(audio_bytes, mime_type)
 
                     # Best-effort local audio signal observer; never blocks main flow.
@@ -429,8 +434,10 @@ async def ws_live(websocket: WebSocket) -> None:
                         transcript_in_log.append(text.strip())
                     await session.send_text(text, bool(end_of_turn))
                 elif msg_type == "audio_stream_end":
-                    print("[client\u2192gemini] audio_stream_end sent to Gemini")
+                    print(f"[client\u2192gemini] audio_stream_end — total {audio_chunk_count} chunks, {total_audio_bytes} bytes sent to Gemini")
                     await session.send_audio_stream_end()
+                    audio_chunk_count = 0
+                    total_audio_bytes = 0
                 elif msg_type == "image":
                     data_b64 = msg.get("data_b64")
                     mime_type = msg.get("mime_type") or "image/jpeg"
@@ -463,6 +470,7 @@ async def ws_live(websocket: WebSocket) -> None:
 
         async def pump_gemini_to_client() -> None:
             nonlocal last_activity
+            print("[gemini\u2192client] pump started, waiting for Gemini responses...")
             async for out in session.receive():
                 print(f"[gemini\u2192client] {out.type}")
                 if out.type == "model_audio" and out.data:
