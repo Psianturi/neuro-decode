@@ -138,29 +138,22 @@ class GeminiLiveSession:
         await self._session.send_realtime_input(audio=blob)
 
     async def send_audio_stream_end(self) -> None:
-        """Signal push-to-talk turn completion to Gemini Live."""
+        """Signal push-to-talk turn completion to Gemini Live.
+
+        Uses send_client_content(turn_complete=True) which is the proven approach
+        that worked with the old text+end_of_turn protocol.
+        Auto-VAD is enabled (default), so Gemini detects speech boundaries
+        automatically. The turn_complete here flushes any pending audio and
+        tells Gemini the user's turn is done.
+        """
         if self._session is None:
             raise RuntimeError("Live session not started")
 
-        try:
-            await self._session.send_realtime_input(activity_end=types.ActivityEnd())
-            print("[gemini_live] activity_end sent successfully")
-        except (TypeError, AttributeError, ValueError) as e:
-            if not _is_unsupported_live_input_error(e):
-                raise
-            print(f"[gemini_live] activity_end not supported, trying audio_stream_end fallback: {e}")
-            try:
-                await self._session.send_realtime_input(audio_stream_end=True)
-                print("[gemini_live] audio_stream_end sent successfully")
-            except (AttributeError, TypeError, ValueError) as e2:
-                if not _is_unsupported_live_input_error(e2):
-                    raise
-                print(f"[gemini_live] audio_stream_end not supported, using text fallback: {e2}")
-                await self._session.send_client_content(
-                    turns={"role": "user", "parts": [{"text": ""}]},
-                    turn_complete=True,
-                )
-                print("[gemini_live] text fallback sent successfully")
+        await self._session.send_client_content(
+            turns={"role": "user", "parts": [{"text": ""}]},
+            turn_complete=True,
+        )
+        print("[gemini_live] turn_complete sent (audio_stream_end)")
 
     async def send_text(self, text: str, end_of_turn: bool = True) -> None:
         if self._session is None:
