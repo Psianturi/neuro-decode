@@ -24,6 +24,23 @@ class NeuroDecodeAI:
         self._model_load_attempted = False
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _load_keras_model(model_path: str) -> Any:
+        from keras import initializers
+        from keras.models import load_model
+
+        custom_objects = {
+            "Orthogonal": initializers.Orthogonal,
+            "GlorotUniform": initializers.GlorotUniform,
+            "Zeros": initializers.Zeros,
+        }
+
+        return load_model(
+            model_path,
+            compile=False,
+            custom_objects=custom_objects,
+        )
+
     def _lazy_load_models(self) -> None:
         if self._models_loaded or self._model_load_attempted:
             return
@@ -36,19 +53,21 @@ class NeuroDecodeAI:
 
             print("[AI Engine] Lazy loading TensorFlow + Keras models...")
             try:
-                from tensorflow.keras.applications.vgg16 import VGG16
-                from tensorflow.keras.models import load_model
+                # NOTE: The training notebook saves models via `keras` (not `tf.keras`).
+                # Loading them with `tensorflow.keras` can fail with errors like:
+                # "keras.src.models.functional cannot be imported".
+                from keras.applications.vgg16 import VGG16
 
                 base_dir = os.path.dirname(os.path.abspath(__file__))
 
                 audio_path = os.path.join(base_dir, "models", "autism_audio_extractor.keras")
                 if os.path.exists(audio_path):
-                    self._audio_extractor = load_model(audio_path)
+                    self._audio_extractor = self._load_keras_model(audio_path)
                     print("[AI Engine] Loaded audio extractor")
 
                 video_path = os.path.join(base_dir, "models", "autism_behavior_extractor.keras")
                 if os.path.exists(video_path):
-                    self._video_extractor = load_model(video_path)
+                    self._video_extractor = self._load_keras_model(video_path)
                     # VGG16 produces dense visual features that match the Colab pipeline.
                     self._vgg16_eyes = VGG16(weights="imagenet", include_top=False, pooling="avg")
                     print("[AI Engine] Loaded video extractor + VGG16")
@@ -103,7 +122,7 @@ class NeuroDecodeAI:
             return ""
 
         try:
-            from tensorflow.keras.applications.vgg16 import preprocess_input
+            from keras.applications.vgg16 import preprocess_input
 
             img_bytes = base64.b64decode(base64_image)
             np_arr = np.frombuffer(img_bytes, np.uint8)

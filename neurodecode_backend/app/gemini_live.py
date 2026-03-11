@@ -172,7 +172,7 @@ class GeminiLiveSession:
         blob = types.Blob(data=image_bytes, mime_type=mime_type)
         await self._session.send_realtime_input(media=blob)
 
-    async def send_observer_note(self, text: str) -> None:
+    async def send_observer_note(self, text: str, *, end_of_turn: bool = False) -> None:
         if self._session is None:
             raise RuntimeError("Live session not started")
 
@@ -181,8 +181,17 @@ class GeminiLiveSession:
             f"{text}"
         )
 
-        # Best-effort: realtime text tends to be less disruptive than client content.
-        # If SDK signature differs, fall back to client content.
+        # Best-effort: realtime input tends to be less disruptive during an active
+        # push-to-talk audio turn. When we need the model to respond immediately
+        # (e.g., a vision observer note while the user is idle), we use client content
+        # with turn_complete=True to trigger an output.
+        if end_of_turn:
+            await self._session.send_client_content(
+                turns={"role": "user", "parts": [{"text": note}]},
+                turn_complete=True,
+            )
+            return
+
         try:
             await self._session.send_realtime_input(text=note)
         except TypeError:
