@@ -19,7 +19,7 @@ class SupportHubScreen extends StatefulWidget {
 }
 
 class _SupportHubScreenState extends State<SupportHubScreen> {
-  bool _observerEnabled = true;
+  bool _observerEnabled = false;
   final SessionSummaryService _summaryService = SessionSummaryService();
 
   @override
@@ -59,7 +59,8 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
             child: SwitchListTile.adaptive(
               value: _observerEnabled,
               title: const Text('Camera Observer'),
-              subtitle: const Text('Send periodic frame for visual cue detection'),
+              subtitle:
+                  const Text('Send periodic frame for visual cue detection'),
               onChanged: (value) {
                 setState(() {
                   _observerEnabled = value;
@@ -98,7 +99,8 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => HistoryInsightsScreen(service: _summaryService),
+                    builder: (_) =>
+                        HistoryInsightsScreen(service: _summaryService),
                   ),
                 );
               },

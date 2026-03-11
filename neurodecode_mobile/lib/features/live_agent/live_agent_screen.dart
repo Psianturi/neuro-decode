@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:logger/logger.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -43,7 +44,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micStreamSub;
   bool _isMicActive = false;
-  final FlutterSoundPlayer _soundPlayer = FlutterSoundPlayer();
+  final FlutterSoundPlayer _soundPlayer =
+      FlutterSoundPlayer(logLevel: Level.warning);
   bool _isPlayerReady = false;
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
@@ -62,6 +64,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
   DateTime? _lastUserChunkAt;
+  String _pendingGeminiTranscript = '';
   final List<String> _debugLog = [];
   final List<ObserverEvent> _observerEvents = [];
 
@@ -227,7 +230,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _seenTranscriptOutInCurrentTurn = true;
         final text = (data['text'] ?? '').toString();
         if (text.isNotEmpty) {
-          _appendGeminiChunk(text);
+          _bufferGeminiTranscript(text);
         }
         return;
       }
@@ -270,6 +273,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _seenTranscriptOutInCurrentTurn = false;
         _lastGeminiChunkAt = null;
         _lastUserChunkAt = null;
+        _commitPendingGeminiTranscript();
         _flushPendingAudio();
         // Delay state change so OS audio buffer can drain
         Future.delayed(const Duration(milliseconds: 600), () {
@@ -285,6 +289,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _stopPlayerStreamNow();
         _geminiTurnComplete = true;
         _lastUserChunkAt = null;
+        _pendingGeminiTranscript = '';
         _addLog('System', 'Gemini response interrupted.');
         _logDebug('player_event', 'interrupted, stream stopped');
         _setStateLabel(AgentState.idle);
@@ -610,6 +615,25 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _scrollToBottom();
   }
 
+  void _bufferGeminiTranscript(String chunk) {
+    final normalized = chunk.trim();
+    if (normalized.isEmpty) return;
+
+    final needsSpace = _pendingGeminiTranscript.isNotEmpty &&
+        !_pendingGeminiTranscript.endsWith(' ') &&
+        !RegExp(r'^[,.;:!?)]').hasMatch(normalized);
+    _pendingGeminiTranscript = needsSpace
+        ? '$_pendingGeminiTranscript $normalized'
+        : '$_pendingGeminiTranscript$normalized';
+  }
+
+  void _commitPendingGeminiTranscript() {
+    final pending = _pendingGeminiTranscript.trim();
+    _pendingGeminiTranscript = '';
+    if (pending.isEmpty) return;
+    _appendGeminiChunk(pending);
+  }
+
   void _appendUserChunk(String chunk) {
     final normalized = chunk.trim();
     if (normalized.isEmpty || !mounted) return;
@@ -682,6 +706,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _seenTranscriptOutInCurrentTurn = false;
     _lastGeminiChunkAt = null;
     _lastUserChunkAt = null;
+    _pendingGeminiTranscript = '';
 
     if (mounted) {
       if (!_backendFatalError) {
