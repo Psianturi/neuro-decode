@@ -33,6 +33,8 @@ class LiveAgentScreen extends StatefulWidget {
 class _LiveAgentScreenState extends State<LiveAgentScreen> {
   static const int _geminiOutputSampleRate = 24000;
   static const int _geminiOutputChannels = 1;
+  static const int _audioFlushThresholdBytes = 9600;
+  static const Duration _audioFlushInterval = Duration(milliseconds: 80);
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSub;
@@ -47,6 +49,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
   static const int _playerBufferSize = 4096;
+  final BytesBuilder _pendingPcmBuffer = BytesBuilder(copy: false);
+  Timer? _audioFlushTimer;
   int _playerSampleRate = _geminiOutputSampleRate;
   CameraController? _cameraController;
   Timer? _visionTimer;
@@ -122,6 +126,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _state != AgentState.speaking;
 
   void _setStateLabel(AgentState next) {
+    if (_state == next) return;
     _logDebug('state_change', '$_state \u2192 $next');
     if (!mounted) return;
     setState(() {
@@ -202,7 +207,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     try {
       final data = jsonDecode(message as String);
       final type = data['type'];
-      _logDebug('ws_event', 'message type=$type');
+      final isHighFrequencyMessage = type == 'model_audio' ||
+          type == 'transcript_in' ||
+          type == 'transcript_out';
+      if (!isHighFrequencyMessage) {
+        _logDebug('ws_event', 'message type=$type');
+      }
 
       if (type == 'transcript_in') {
         final text = (data['text'] ?? '').toString();
@@ -248,7 +258,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
               'player_event', 'sample rate updated to ${_playerSampleRate}Hz');
         }
         if (b64.isNotEmpty) {
-          _feedAudio(Uint8List.fromList(base64Decode(b64)));
+          _queueAudioChunk(Uint8List.fromList(base64Decode(b64)));
         }
         return;
       }
@@ -260,6 +270,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         _seenTranscriptOutInCurrentTurn = false;
         _lastGeminiChunkAt = null;
         _lastUserChunkAt = null;
+        _flushPendingAudio();
         // Delay state change so OS audio buffer can drain
         Future.delayed(const Duration(milliseconds: 600), () {
           if (mounted && _geminiTurnComplete) {
@@ -480,6 +491,37 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         .catchError((e) => _logDebug('player_event', 'feed error: $e'));
   }
 
+  void _queueAudioChunk(Uint8List pcm) {
+    if (pcm.isEmpty) return;
+
+    _pendingPcmBuffer.add(pcm);
+    if (_pendingPcmBuffer.length >= _audioFlushThresholdBytes) {
+      _flushPendingAudio();
+      return;
+    }
+
+    _audioFlushTimer ??= Timer(_audioFlushInterval, () {
+      _audioFlushTimer = null;
+      _flushPendingAudio();
+    });
+  }
+
+  void _flushPendingAudio() {
+    _audioFlushTimer?.cancel();
+    _audioFlushTimer = null;
+    if (_pendingPcmBuffer.length == 0) return;
+
+    final pcm = _pendingPcmBuffer.takeBytes();
+    _feedAudio(pcm);
+  }
+
+  void _clearPendingAudio() {
+    _audioFlushTimer?.cancel();
+    _audioFlushTimer = null;
+    if (_pendingPcmBuffer.length == 0) return;
+    _pendingPcmBuffer.takeBytes();
+  }
+
   Future<void> _doFeedAudio(Uint8List pcm) async {
     if (!_isPlayerReady) return;
     if (!_isPlayerStreamOpen) {
@@ -500,6 +542,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _closePlayerStream() {
+    _flushPendingAudio();
     if (_isPlayerStreamOpen) {
       _soundPlayer.stopPlayer();
       _isPlayerStreamOpen = false;
@@ -509,6 +552,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _stopPlayerStreamNow() {
+    _clearPendingAudio();
     if (_isPlayerStreamOpen) {
       _soundPlayer.stopPlayer();
       _isPlayerStreamOpen = false;
@@ -661,6 +705,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _channel?.sink.close();
     _channel = null;
     _stopPlayerStreamNow();
+    _audioFlushTimer?.cancel();
     _soundPlayer.closePlayer();
     _scrollController.dispose();
     _cameraController?.dispose();
