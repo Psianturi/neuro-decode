@@ -94,11 +94,18 @@ class GeminiLiveSession:
 
         self._cm: Any | None = None
         self._session: Any | None = None
+        self._audio_activity_started = False
 
     async def __aenter__(self) -> "GeminiLiveSession":
         config: dict[str, Any] = {
             "response_modalities": [self._response_modality],
             "system_instruction": self._system_instruction,
+            "realtime_input_config": types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    disabled=True,
+                ),
+                activity_handling=types.ActivityHandling.NO_INTERRUPTION,
+            ),
         }
 
         # Disable thinking for AUDIO modality to prevent chain-of-thought
@@ -129,31 +136,42 @@ class GeminiLiveSession:
             await self._cm.__aexit__(exc_type, exc, tb)
         self._cm = None
         self._session = None
+        self._audio_activity_started = False
 
     async def send_audio(self, audio_bytes: bytes, mime_type: str) -> None:
         if self._session is None:
             raise RuntimeError("Live session not started")
 
         blob = types.Blob(data=audio_bytes, mime_type=mime_type)
-        await self._session.send_realtime_input(audio=blob)
+        kwargs: dict[str, Any] = {"audio": blob}
+        if not self._audio_activity_started:
+            kwargs["activity_start"] = types.ActivityStart()
+            self._audio_activity_started = True
+
+        await self._session.send_realtime_input(**kwargs)
 
     async def send_audio_stream_end(self) -> None:
-        """Signal push-to-talk turn completion to Gemini Live.
-
-        Uses send_client_content(turn_complete=True) which is the proven approach
-        that worked with the old text+end_of_turn protocol.
-        Auto-VAD is enabled (default), so Gemini detects speech boundaries
-        automatically. The turn_complete here flushes any pending audio and
-        tells Gemini the user's turn is done.
-        """
+        """Signal push-to-talk turn completion to Gemini Live."""
         if self._session is None:
             raise RuntimeError("Live session not started")
 
-        await self._session.send_client_content(
-            turns={"role": "user", "parts": [{"text": ""}]},
-            turn_complete=True,
-        )
-        print("[gemini_live] turn_complete sent (audio_stream_end)")
+        try:
+            if self._audio_activity_started:
+                await self._session.send_realtime_input(
+                    audio_stream_end=True,
+                    activity_end=types.ActivityEnd(),
+                )
+            else:
+                await self._session.send_realtime_input(audio_stream_end=True)
+            print("[gemini_live] audio_stream_end sent with explicit activity_end")
+        except TypeError:
+            await self._session.send_client_content(
+                turns={"role": "user", "parts": [{"text": ""}]},
+                turn_complete=True,
+            )
+            print("[gemini_live] fallback turn_complete sent (audio_stream_end)")
+        finally:
+            self._audio_activity_started = False
 
     async def send_text(self, text: str, end_of_turn: bool = True) -> None:
         if self._session is None:

@@ -287,7 +287,13 @@ async def ws_live(websocket: WebSocket) -> None:
         transcript_out_log: list[str] = []
         audio_observer_task: asyncio.Task[None] | None = None
         vision_observer_task: asyncio.Task[None] | None = None
+        audio_turn_open = False
+        awaiting_model_response = False
+        model_turn_active = False
         print("[ws_live] Session started — Gemini connected")
+
+        def can_forward_visual_context() -> bool:
+            return not audio_turn_open and not awaiting_model_response and not model_turn_active
 
         async def run_audio_observer(observer_audio: bytes) -> None:
             try:
@@ -311,9 +317,9 @@ async def ws_live(websocket: WebSocket) -> None:
                     print(f"[observer] Visual note triggered")
                     observer_visual_log.append(note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    # Vision notes can arrive when the caregiver is silent; trigger
-                    # an immediate model response so the UI shows guidance.
-                    await session.send_observer_note(note, end_of_turn=True)
+                    # Only let vision notes trigger a new response when the session
+                    # is conversationally idle; otherwise keep them as passive context.
+                    await session.send_observer_note(note, end_of_turn=can_forward_visual_context())
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -398,7 +404,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     return
 
         async def pump_client_to_gemini() -> None:
-            nonlocal close_reason, last_activity, last_audio_note_ts, last_vision_note_ts, audio_observer_task, vision_observer_task
+            nonlocal close_reason, last_activity, last_audio_note_ts, last_vision_note_ts, audio_observer_task, vision_observer_task, audio_turn_open, awaiting_model_response
             audio_chunk_count = 0
             total_audio_bytes = 0
             while True:
@@ -415,6 +421,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     if not isinstance(data_b64, str):
                         raise ValueError("audio.data_b64 must be a string")
                     audio_bytes = b64_decode(data_b64)
+                    audio_turn_open = True
+                    awaiting_model_response = False
                     audio_chunk_count += 1
                     total_audio_bytes += len(audio_bytes)
                     await session.send_audio(audio_bytes, mime_type)
@@ -441,6 +449,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     await session.send_text(text, bool(end_of_turn))
                 elif msg_type == "audio_stream_end":
                     print(f"[client\u2192gemini] audio_stream_end — total {audio_chunk_count} chunks, {total_audio_bytes} bytes sent to Gemini")
+                    audio_turn_open = False
+                    awaiting_model_response = True
                     await session.send_audio_stream_end()
                     audio_chunk_count = 0
                     total_audio_bytes = 0
@@ -456,8 +466,9 @@ async def ws_live(websocket: WebSocket) -> None:
                         if vision_observer_task is None or vision_observer_task.done():
                             vision_observer_task = asyncio.create_task(run_vision_observer(data_b64))
 
-                    image_bytes = b64_decode(data_b64)
-                    await session.send_image(image_bytes, mime_type)
+                    if can_forward_visual_context():
+                        image_bytes = b64_decode(data_b64)
+                        await session.send_image(image_bytes, mime_type)
                 elif msg_type == "observer_note":
                     text = msg.get("text")
                     if not isinstance(text, str):
@@ -475,7 +486,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     raise ValueError(f"Unsupported message type: {msg_type}")
 
         async def pump_gemini_to_client() -> None:
-            nonlocal last_activity
+            nonlocal last_activity, awaiting_model_response, model_turn_active
             print("[gemini\u2192client] pump started, waiting for Gemini responses...")
             # The underlying Live SDK receive stream may complete after a turn.
             # Keep the WebSocket session alive by re-entering the receive loop.
@@ -483,6 +494,8 @@ async def ws_live(websocket: WebSocket) -> None:
                 async for out in session.receive():
                     print(f"[gemini\u2192client] {out.type}")
                     if out.type == "model_audio" and out.data:
+                        awaiting_model_response = False
+                        model_turn_active = True
                         last_activity = time.monotonic()
                         await websocket.send_text(
                             json.dumps(
@@ -497,6 +510,9 @@ async def ws_live(websocket: WebSocket) -> None:
                         if out.text:
                             if out.type in {"model_text", "transcript_out"} and _looks_like_internal_note(out.text):
                                 continue
+                            if out.type != "transcript_in":
+                                awaiting_model_response = False
+                                model_turn_active = True
                             last_activity = time.monotonic()
                             if out.type == "transcript_in":
                                 transcript_in_log.append(out.text.strip())
@@ -508,10 +524,14 @@ async def ws_live(websocket: WebSocket) -> None:
                                 json.dumps({"type": out.type, "text": out.text})
                             )
                     elif out.type == "model_audio_end":
+                        awaiting_model_response = False
+                        model_turn_active = False
                         last_activity = time.monotonic()
                         print("[gemini\u2192client] model_audio_end \u2014 turn complete")
                         await websocket.send_text(json.dumps({"type": "model_audio_end"}))
                     elif out.type == "interrupted":
+                        awaiting_model_response = False
+                        model_turn_active = False
                         last_activity = time.monotonic()
                         print("[gemini\u2192client] interrupted")
                         await websocket.send_text(json.dumps({"type": "interrupted"}))

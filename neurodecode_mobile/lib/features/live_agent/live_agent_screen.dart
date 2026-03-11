@@ -56,6 +56,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
+  DateTime? _lastUserChunkAt;
   final List<String> _debugLog = [];
   final List<ObserverEvent> _observerEvents = [];
 
@@ -112,6 +113,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   bool get _isConnected =>
       _channel != null && _wsSub != null && _state != AgentState.error;
+
+  bool get _shouldStreamVisionContext =>
+      _isConnected &&
+      !_isMicActive &&
+      _state != AgentState.thinking &&
+      _state != AgentState.speaking;
 
   void _setStateLabel(AgentState next) {
     _logDebug('state_change', '$_state \u2192 $next');
@@ -185,96 +192,101 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   void _onMessageReceived(dynamic message) {
     try {
-    final data = jsonDecode(message as String);
-    final type = data['type'];
-    _logDebug('ws_event', 'message type=$type');
+      final data = jsonDecode(message as String);
+      final type = data['type'];
+      _logDebug('ws_event', 'message type=$type');
 
-    if (type == 'transcript_in') {
-      final text = (data['text'] ?? '').toString();
-      if (text.isNotEmpty) {
-        _addLog('You', text);
-      }
-      return;
-    }
-
-    if (type == 'transcript_out') {
-      _setStateLabel(AgentState.speaking);
-      _seenTranscriptOutInCurrentTurn = true;
-      final text = (data['text'] ?? '').toString();
-      if (text.isNotEmpty) {
-        _appendGeminiChunk(text);
-      }
-      return;
-    }
-
-    if (type == 'model_text') {
-      if (_seenTranscriptOutInCurrentTurn) {
+      if (type == 'transcript_in') {
+        final text = (data['text'] ?? '').toString();
+        if (text.isNotEmpty) {
+          _appendUserChunk(text);
+        }
         return;
       }
-      _setStateLabel(AgentState.speaking);
-      final text = (data['text'] ?? data['data'] ?? '').toString();
-      if (text.isNotEmpty) {
-        _appendGeminiChunk(text);
-      }
-      return;
-    }
 
-    if (type == 'model_audio') {
-      _setStateLabel(AgentState.speaking);
-      _geminiTurnComplete = false;
-      final b64 = (data['data_b64'] ?? '').toString();
-      final mimeType = (data['mime_type'] ?? '').toString();
-      final nextSampleRate = _sampleRateFromMimeType(mimeType) ?? _geminiOutputSampleRate;
-      if (nextSampleRate != _playerSampleRate) {
-        _playerSampleRate = nextSampleRate;
-        _stopPlayerStreamNow();
-        _logDebug('player_event', 'sample rate updated to ${_playerSampleRate}Hz');
-      }
-      if (b64.isNotEmpty) {
-        _feedAudio(Uint8List.fromList(base64Decode(b64)));
-      }
-      return;
-    }
-
-    if (type == 'model_audio_end') {
-      _logDebug('audio_end', 'turn complete, delaying 600ms for buffer drain');
-      _geminiTurnComplete = true;
-      _seenTranscriptOutInCurrentTurn = false;
-      _lastGeminiChunkAt = null;
-      // Delay state change so OS audio buffer can drain
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (mounted && _geminiTurnComplete) {
-          _closePlayerStream();
-          _setStateLabel(AgentState.idle);
+      if (type == 'transcript_out') {
+        _setStateLabel(AgentState.speaking);
+        _seenTranscriptOutInCurrentTurn = true;
+        final text = (data['text'] ?? '').toString();
+        if (text.isNotEmpty) {
+          _appendGeminiChunk(text);
         }
-      });
-      return;
-    }
-
-    if (type == 'interrupted') {
-      _stopPlayerStreamNow();
-      _geminiTurnComplete = true;
-      _addLog('System', 'Gemini response interrupted.');
-      _logDebug('player_event', 'interrupted, stream stopped');
-      _setStateLabel(AgentState.idle);
-      return;
-    }
-
-    if (type == 'error') {
-      _setStateLabel(AgentState.error);
-      final text = (data['message'] ?? 'Unknown backend error').toString();
-      _addLog('Error', text);
-    }
-
-    if (type == 'observer_note') {
-      final text = (data['text'] ?? '').toString();
-      if (text.isNotEmpty) {
-        _addObserverEvent(
-          text: text,
-          confidence: ObserverConfidence.medium,
-        );
+        return;
       }
-    }
+
+      if (type == 'model_text') {
+        if (_seenTranscriptOutInCurrentTurn) {
+          return;
+        }
+        _setStateLabel(AgentState.speaking);
+        final text = (data['text'] ?? data['data'] ?? '').toString();
+        if (text.isNotEmpty) {
+          _appendGeminiChunk(text);
+        }
+        return;
+      }
+
+      if (type == 'model_audio') {
+        _setStateLabel(AgentState.speaking);
+        _geminiTurnComplete = false;
+        final b64 = (data['data_b64'] ?? '').toString();
+        final mimeType = (data['mime_type'] ?? '').toString();
+        final nextSampleRate =
+            _sampleRateFromMimeType(mimeType) ?? _geminiOutputSampleRate;
+        if (nextSampleRate != _playerSampleRate) {
+          _playerSampleRate = nextSampleRate;
+          _stopPlayerStreamNow();
+          _logDebug(
+              'player_event', 'sample rate updated to ${_playerSampleRate}Hz');
+        }
+        if (b64.isNotEmpty) {
+          _feedAudio(Uint8List.fromList(base64Decode(b64)));
+        }
+        return;
+      }
+
+      if (type == 'model_audio_end') {
+        _logDebug(
+            'audio_end', 'turn complete, delaying 600ms for buffer drain');
+        _geminiTurnComplete = true;
+        _seenTranscriptOutInCurrentTurn = false;
+        _lastGeminiChunkAt = null;
+        _lastUserChunkAt = null;
+        // Delay state change so OS audio buffer can drain
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted && _geminiTurnComplete) {
+            _closePlayerStream();
+            _setStateLabel(AgentState.idle);
+          }
+        });
+        return;
+      }
+
+      if (type == 'interrupted') {
+        _stopPlayerStreamNow();
+        _geminiTurnComplete = true;
+        _lastUserChunkAt = null;
+        _addLog('System', 'Gemini response interrupted.');
+        _logDebug('player_event', 'interrupted, stream stopped');
+        _setStateLabel(AgentState.idle);
+        return;
+      }
+
+      if (type == 'error') {
+        _setStateLabel(AgentState.error);
+        final text = (data['message'] ?? 'Unknown backend error').toString();
+        _addLog('Error', text);
+      }
+
+      if (type == 'observer_note') {
+        final text = (data['text'] ?? '').toString();
+        if (text.isNotEmpty) {
+          _addObserverEvent(
+            text: text,
+            confidence: ObserverConfidence.medium,
+          );
+        }
+      }
     } catch (e, stackTrace) {
       _logDebug('ws_event', 'ERROR processing message: $e');
       _addLog('Error', 'Failed to process message: $e');
@@ -301,7 +313,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _toggleMic() async {
-    _logDebug('mic_toggle', 'START: mic=$_isMicActive state=$_state connected=$_isConnected');
+    _logDebug('mic_toggle',
+        'START: mic=$_isMicActive state=$_state connected=$_isConnected');
     if (!_isConnected) {
       _addLog('System', 'Agent is not connected yet. Reconnecting...');
       if (mounted) {
@@ -353,7 +366,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   Future<void> _captureAndSendFrame() async {
     final controller = _cameraController;
     if (controller == null || !controller.value.isInitialized) return;
-    if (!_isConnected || _channel == null) return;
+    if (!_shouldStreamVisionContext || _channel == null) return;
     if (_isCapturingFrame) return;
 
     _isCapturingFrame = true;
@@ -414,7 +427,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _micStreamSub = null;
     _recorder.stop();
     if (mounted) {
-      setState(() { _isMicActive = false; });
+      setState(() {
+        _isMicActive = false;
+      });
     }
   }
 
@@ -502,7 +517,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   int? _sampleRateFromMimeType(String mimeType) {
-    final match = RegExp(r'rate=(\d+)', caseSensitive: false).firstMatch(mimeType);
+    final match =
+        RegExp(r'rate=(\d+)', caseSensitive: false).firstMatch(mimeType);
     if (match == null) return null;
     return int.tryParse(match.group(1)!);
   }
@@ -515,7 +531,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     final shouldMerge = _transcriptLog.isNotEmpty &&
         _transcriptLog.last['sender'] == 'Gemini' &&
         _lastGeminiChunkAt != null &&
-        now.difference(_lastGeminiChunkAt!) < const Duration(milliseconds: 1200);
+        now.difference(_lastGeminiChunkAt!) <
+            const Duration(milliseconds: 1200);
 
     setState(() {
       if (shouldMerge) {
@@ -523,7 +540,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         final needsSpace = previous.isNotEmpty &&
             !previous.endsWith(' ') &&
             !RegExp(r'^[,.;:!?)]').hasMatch(normalized);
-        final merged = needsSpace ? '$previous $normalized' : '$previous$normalized';
+        final merged =
+            needsSpace ? '$previous $normalized' : '$previous$normalized';
         _transcriptLog[_transcriptLog.length - 1] = {
           'sender': 'Gemini',
           'text': merged,
@@ -534,6 +552,37 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     });
 
     _lastGeminiChunkAt = now;
+    _scrollToBottom();
+  }
+
+  void _appendUserChunk(String chunk) {
+    final normalized = chunk.trim();
+    if (normalized.isEmpty || !mounted) return;
+
+    final now = DateTime.now();
+    final shouldMerge = _transcriptLog.isNotEmpty &&
+        _transcriptLog.last['sender'] == 'You' &&
+        _lastUserChunkAt != null &&
+        now.difference(_lastUserChunkAt!) < const Duration(milliseconds: 1500);
+
+    setState(() {
+      if (shouldMerge) {
+        final previous = _transcriptLog.last['text'] ?? '';
+        final needsSpace = previous.isNotEmpty &&
+            !previous.endsWith(' ') &&
+            !RegExp(r'^[,.;:!?)]').hasMatch(normalized);
+        final merged =
+            needsSpace ? '$previous $normalized' : '$previous$normalized';
+        _transcriptLog[_transcriptLog.length - 1] = {
+          'sender': 'You',
+          'text': merged,
+        };
+      } else {
+        _transcriptLog.add({'sender': 'You', 'text': normalized});
+      }
+    });
+
+    _lastUserChunkAt = now;
     _scrollToBottom();
   }
 
@@ -577,6 +626,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _geminiTurnComplete = true;
     _seenTranscriptOutInCurrentTurn = false;
     _lastGeminiChunkAt = null;
+    _lastUserChunkAt = null;
 
     if (mounted) {
       _setStateLabel(AgentState.idle);
@@ -737,14 +787,15 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     final text = entry['text']!;
                     final isGemini = sender == 'Gemini';
                     final isSystem = sender == 'System' || sender == 'Error';
-                    final isLight = Theme.of(context).brightness == Brightness.light;
+                    final isLight =
+                        Theme.of(context).brightness == Brightness.light;
 
                     return Align(
                       alignment: isSystem
                           ? Alignment.center
                           : (isGemini
-                                ? Alignment.centerLeft
-                                : Alignment.centerRight),
+                              ? Alignment.centerLeft
+                              : Alignment.centerRight),
                       child: Container(
                         padding: const EdgeInsets.all(12),
                         margin: const EdgeInsets.symmetric(vertical: 4),
@@ -752,8 +803,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                           color: isSystem
                               ? Colors.transparent
                               : (isGemini
-                                    ? NeuroColors.surfaceVariant
-                                    : NeuroColors.surface),
+                                  ? NeuroColors.surfaceVariant
+                                  : NeuroColors.surface),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -761,10 +812,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                           style: TextStyle(
                             color: isSystem
                                 ? Colors.grey
-                                : (isLight ? NeuroColors.textPrimary : Colors.white),
-                            fontStyle: isSystem
-                                ? FontStyle.italic
-                                : FontStyle.normal,
+                                : (isLight
+                                    ? NeuroColors.textPrimary
+                                    : Colors.white),
+                            fontStyle:
+                                isSystem ? FontStyle.italic : FontStyle.normal,
                           ),
                         ),
                       ),
@@ -895,10 +947,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                   width: 220,
                   height: 48,
                   child: ElevatedButton.icon(
-                    onPressed:
-                        _state == AgentState.connecting
-                            ? null
-                            : (_isConnected ? _disconnect : _connect),
+                    onPressed: _state == AgentState.connecting
+                        ? null
+                        : (_isConnected ? _disconnect : _connect),
                     icon: Icon(
                       _isConnected
                           ? Icons.stop_circle_outlined
@@ -914,8 +965,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                               : 'Reconnect'),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          _isConnected ? Colors.red.shade400 : NeuroColors.primary,
+                      backgroundColor: _isConnected
+                          ? Colors.red.shade400
+                          : NeuroColors.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(24),
