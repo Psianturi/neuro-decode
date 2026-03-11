@@ -153,9 +153,9 @@ class NeuroDecodeAI:
             behavior_features = self._video_extractor.predict(model_input, verbose=0)
             raw_score = float(np.max(np.abs(behavior_features[0])))
             stimming_confidence = self._sigmoid(raw_score)
-            print(f"[AI Engine] Vision: raw={raw_score:.4f} sigmoid={stimming_confidence:.4f} threshold=0.7")
+            print(f"[AI Engine] Vision: raw={raw_score:.4f} sigmoid={stimming_confidence:.4f} threshold=0.55")
 
-            if stimming_confidence > 0.7:
+            if stimming_confidence > 0.55:
                 return (
                     "[Visual Observer Note] Possible repetitive movement pattern detected. "
                     "Guide caregiver to reduce sensory load and offer grounding support."

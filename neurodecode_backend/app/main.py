@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from datetime import datetime, timezone
 from urllib import error as urlerror
@@ -47,6 +48,12 @@ SYSTEM_INSTRUCTION = (
     "more detail is clearly needed. Do not give a long self-introduction or repeat "
     "your role unless the caregiver asks. Never say the phrases [Visual Observer Note], "
     "[Audio Observer Note], INTERNAL SENSOR NOTE, or quote private sensor notes verbatim. "
+    "Never prefix any reply with labels such as 'Observer Note', '[Visual Observer Note]', "
+    "'[Audio Observer Note]', 'internal note', or similar hidden-context markers. If a hidden "
+    "note influences your reasoning, silently translate it into calm caregiver-facing advice "
+    "without revealing the note, the source, or the raw observation text. If you accidentally "
+    "start drafting an observer label, immediately self-correct and continue with a normal "
+    "caregiver-facing sentence only. "
     "At session start, stay quiet until the caregiver speaks or an observer note creates a "
     "clear reason to respond."
 )
@@ -61,6 +68,25 @@ def _looks_like_internal_note(text: str) -> bool:
         "private context",
     )
     return any(marker in normalized for marker in markers)
+
+
+def _sanitize_caregiver_text(text: str) -> str:
+    sanitized = text.strip()
+    if not sanitized:
+        return ""
+
+    patterns = (
+        r"\[\s*visual observer note\s*\]",
+        r"\[\s*audio observer note\s*\]",
+        r"internal sensor note\s*\([^)]*\)\s*:",
+        r"internal sensor note\s*:",
+        r"observer note\s*:",
+    )
+    for pattern in patterns:
+        sanitized = re.sub(pattern, "", sanitized, flags=re.IGNORECASE).strip()
+
+    sanitized = re.sub(r"\s{2,}", " ", sanitized).strip(" :-")
+    return sanitized
 
 
 def _truncate_items(items: list[str], max_items: int = 14) -> list[str]:
@@ -508,8 +534,11 @@ async def ws_live(websocket: WebSocket) -> None:
                         )
                     elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                         if out.text:
-                            if out.type in {"model_text", "transcript_out"} and _looks_like_internal_note(out.text):
-                                continue
+                            outgoing_text = out.text
+                            if out.type in {"model_text", "transcript_out"}:
+                                outgoing_text = _sanitize_caregiver_text(outgoing_text)
+                                if not outgoing_text or _looks_like_internal_note(outgoing_text):
+                                    continue
                             if out.type != "transcript_in":
                                 awaiting_model_response = False
                                 model_turn_active = True
@@ -517,11 +546,11 @@ async def ws_live(websocket: WebSocket) -> None:
                             if out.type == "transcript_in":
                                 transcript_in_log.append(out.text.strip())
                             elif out.type == "transcript_out":
-                                transcript_out_log.append(out.text.strip())
+                                transcript_out_log.append(outgoing_text.strip())
                             elif out.type == "model_text":
-                                transcript_out_log.append(out.text.strip())
+                                transcript_out_log.append(outgoing_text.strip())
                             await websocket.send_text(
-                                json.dumps({"type": out.type, "text": out.text})
+                                json.dumps({"type": out.type, "text": outgoing_text})
                             )
                     elif out.type == "model_audio_end":
                         awaiting_model_response = False
