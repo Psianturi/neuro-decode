@@ -143,12 +143,11 @@ class GeminiLiveSession:
             raise RuntimeError("Live session not started")
 
         blob = types.Blob(data=audio_bytes, mime_type=mime_type)
-        kwargs: dict[str, Any] = {"audio": blob}
         if not self._audio_activity_started:
-            kwargs["activity_start"] = types.ActivityStart()
+            await self._session.send_realtime_input(activity_start=types.ActivityStart())
             self._audio_activity_started = True
 
-        await self._session.send_realtime_input(**kwargs)
+        await self._session.send_realtime_input(audio=blob)
 
     async def send_audio_stream_end(self) -> None:
         """Signal push-to-talk turn completion to Gemini Live."""
@@ -157,13 +156,11 @@ class GeminiLiveSession:
 
         try:
             if self._audio_activity_started:
-                await self._session.send_realtime_input(
-                    audio_stream_end=True,
-                    activity_end=types.ActivityEnd(),
-                )
+                await self._session.send_realtime_input(audio_stream_end=True)
+                await self._session.send_realtime_input(activity_end=types.ActivityEnd())
             else:
                 await self._session.send_realtime_input(audio_stream_end=True)
-            print("[gemini_live] audio_stream_end sent with explicit activity_end")
+            print("[gemini_live] audio_stream_end and activity_end sent")
         except TypeError:
             await self._session.send_client_content(
                 turns={"role": "user", "parts": [{"text": ""}]},

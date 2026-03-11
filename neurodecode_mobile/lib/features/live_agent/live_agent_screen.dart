@@ -53,6 +53,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isCapturingFrame = false;
   bool _isCleaningUp = false;
   bool _isManualClose = false;
+  bool _backendFatalError = false;
 
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
@@ -131,6 +132,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   void _connect() {
     if (_isConnected) return;
     _isManualClose = false;
+    _backendFatalError = false;
     _setStateLabel(AgentState.connecting);
     _logDebug('ws_event', 'connecting ${AppConfig.wsEndpoint}');
     try {
@@ -140,11 +142,14 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         onDone: () {
           _logDebug('ws_event', 'connection closed (onDone)');
           _handleSocketClosed(manual: false);
-          if (!_isManualClose && mounted) {
+          if (!_isManualClose && !_backendFatalError && mounted) {
             _logDebug('ws_event', 'auto-reconnecting in 3s...');
             _addLog('System', 'Connection lost. Reconnecting...');
             Future.delayed(const Duration(seconds: 3), () {
-              if (mounted && !_isConnected && !_isManualClose) _connect();
+              if (mounted &&
+                  !_isConnected &&
+                  !_isManualClose &&
+                  !_backendFatalError) _connect();
             });
           }
         },
@@ -153,10 +158,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
           _addLog('Error', 'Connection error: $error');
           _logDebug('ws_event', 'error: $error');
           _handleSocketClosed(manual: false);
-          if (!_isManualClose && mounted) {
+          if (!_isManualClose && !_backendFatalError && mounted) {
             _logDebug('ws_event', 'auto-reconnecting in 3s...');
             Future.delayed(const Duration(seconds: 3), () {
-              if (mounted && !_isConnected && !_isManualClose) _connect();
+              if (mounted &&
+                  !_isConnected &&
+                  !_isManualClose &&
+                  !_backendFatalError) _connect();
             });
           }
         },
@@ -273,9 +281,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       }
 
       if (type == 'error') {
+        _backendFatalError = true;
         _setStateLabel(AgentState.error);
         final text = (data['message'] ?? 'Unknown backend error').toString();
         _addLog('Error', text);
+        _channel?.sink.close();
+        return;
       }
 
       if (type == 'observer_note') {
@@ -629,7 +640,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _lastUserChunkAt = null;
 
     if (mounted) {
-      _setStateLabel(AgentState.idle);
+      if (!_backendFatalError) {
+        _setStateLabel(AgentState.idle);
+      }
       if (manual) {
         _addLog('System', 'Session terminated.');
       }
