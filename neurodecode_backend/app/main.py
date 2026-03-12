@@ -57,6 +57,9 @@ SYSTEM_INSTRUCTION = (
     "without revealing the note, the source, or the raw observation text. If you accidentally "
     "start drafting an observer label, immediately self-correct and continue with a normal "
     "caregiver-facing sentence only. "
+    "If the latest user input appears to be only silence, background noise, filler, or unintelligible fragments, "
+    "do not treat it as a meaningful request. Avoid giving a full intervention response to raw placeholders such as '.', '...', '[noise]', or similar non-speech markers. "
+    "Instead, remain brief and neutral, or wait for clearer caregiver input. "
     "At session start, stay quiet until the caregiver speaks or an observer note creates a "
     "clear reason to respond."
 )

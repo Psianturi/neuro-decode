@@ -38,8 +38,11 @@ class LiveAgentScreen extends StatefulWidget {
 class _LiveAgentScreenState extends State<LiveAgentScreen> {
   static const int _geminiOutputSampleRate = 24000;
   static const int _geminiOutputChannels = 1;
-  static const int _audioFlushThresholdBytes = 9600;
-  static const Duration _audioFlushInterval = Duration(milliseconds: 80);
+  static const int _audioFlushThresholdBytes = 7680;
+  static const Duration _audioFlushInterval = Duration(milliseconds: 45);
+  static const int _minTurnAudioBytes = 8000;
+  static const Duration _minTurnDuration = Duration(milliseconds: 350);
+  static const Duration _playerIdleCloseDelay = Duration(seconds: 8);
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSub;
@@ -54,9 +57,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
-  static const int _playerBufferSize = 4096;
+  static const int _playerBufferSize = 8192;
   final BytesBuilder _pendingPcmBuffer = BytesBuilder(copy: false);
   Timer? _audioFlushTimer;
+  Timer? _playerIdleTimer;
   int _playerSampleRate = _geminiOutputSampleRate;
   CameraController? _cameraController;
   Timer? _visionTimer;
@@ -64,6 +68,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isCleaningUp = false;
   bool _isManualClose = false;
   bool _backendFatalError = false;
+  int _currentTurnAudioBytes = 0;
+  DateTime? _currentTurnStartedAt;
 
   bool _seenTranscriptOutInCurrentTurn = false;
   DateTime? _lastGeminiChunkAt;
@@ -201,9 +207,20 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     }
   }
 
-  void _disconnect() {
+  Future<void> _disconnect() async {
     _isManualClose = true;
     _stopVisionLoop();
+    _stopMicStreamSync();
+    final currentChannel = _channel;
+    if (currentChannel != null) {
+      try {
+        currentChannel.sink.add(jsonEncode({'type': 'close'}));
+        _logDebug('ws_event', 'close message sent');
+        await Future.delayed(const Duration(milliseconds: 180));
+      } catch (e) {
+        _logDebug('ws_event', 'close message failed: $e');
+      }
+    }
     _handleSocketClosed(manual: true);
   }
 
@@ -231,7 +248,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
       if (type == 'transcript_in') {
         final text = (data['text'] ?? '').toString();
-        if (text.isNotEmpty) {
+        if (_shouldDisplayUserTranscript(text)) {
           _appendUserChunk(text);
         }
         return;
@@ -262,6 +279,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       if (type == 'model_audio') {
         _setStateLabel(AgentState.speaking);
         _geminiTurnComplete = false;
+        _cancelPlayerIdleClose();
         final b64 = (data['data_b64'] ?? '').toString();
         final mimeType = (data['mime_type'] ?? '').toString();
         final nextSampleRate =
@@ -290,8 +308,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         // Delay state change so OS audio buffer can drain
         Future.delayed(const Duration(milliseconds: 600), () {
           if (mounted && _geminiTurnComplete) {
-            _closePlayerStream();
             _setStateLabel(AgentState.idle);
+            _schedulePlayerIdleClose();
           }
         });
         return;
@@ -438,6 +456,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     );
 
     final stream = await _recorder.startStream(config);
+    _currentTurnAudioBytes = 0;
+    _currentTurnStartedAt = DateTime.now();
     if (mounted) {
       setState(() {
         _isMicActive = true;
@@ -455,6 +475,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         'data_b64': base64Encode(chunk),
         'mime_type': 'audio/pcm;rate=16000',
       };
+      _currentTurnAudioBytes += chunk.length;
       currentChannel.sink.add(jsonEncode(payload));
     });
   }
@@ -480,7 +501,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     await _recorder.stop();
     _logDebug('mic_event', 'toggle OFF — streaming stopped');
 
-    if (_isConnected && _channel != null) {
+    final turnDuration = _currentTurnStartedAt == null
+        ? Duration.zero
+        : DateTime.now().difference(_currentTurnStartedAt!);
+    final shouldIgnoreShortTurn = _currentTurnAudioBytes < _minTurnAudioBytes ||
+        turnDuration < _minTurnDuration;
+
+    if (_isConnected && _channel != null && !shouldIgnoreShortTurn) {
       _channel!.sink.add(
         jsonEncode(
           {
@@ -489,17 +516,24 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         ),
       );
       _logDebug('turn_event', 'audio_stream_end sent');
+    } else if (shouldIgnoreShortTurn) {
+      _logDebug(
+        'turn_event',
+        'short turn ignored ($_currentTurnAudioBytes bytes, ${turnDuration.inMilliseconds}ms)',
+      );
     }
+
+    _currentTurnAudioBytes = 0;
+    _currentTurnStartedAt = null;
 
     if (mounted) {
       setState(() {
         _isMicActive = false;
       });
     }
-    _setStateLabel(AgentState.thinking);
+    _setStateLabel(
+        shouldIgnoreShortTurn ? AgentState.idle : AgentState.thinking);
   }
-
-  // ── PCM streaming audio playback (pipe-to-speaker) ──
 
   void _feedAudio(Uint8List pcm) {
     // Chain feed operations to ensure sequential execution.
@@ -532,6 +566,20 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _feedAudio(pcm);
   }
 
+  void _cancelPlayerIdleClose() {
+    _playerIdleTimer?.cancel();
+    _playerIdleTimer = null;
+  }
+
+  void _schedulePlayerIdleClose() {
+    _cancelPlayerIdleClose();
+    _playerIdleTimer = Timer(_playerIdleCloseDelay, () {
+      if (!_isMicActive && _geminiTurnComplete) {
+        _closePlayerStream();
+      }
+    });
+  }
+
   void _clearPendingAudio() {
     _audioFlushTimer?.cancel();
     _audioFlushTimer = null;
@@ -541,6 +589,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   Future<void> _doFeedAudio(Uint8List pcm) async {
     if (!_isPlayerReady) return;
+    _cancelPlayerIdleClose();
     if (!_isPlayerStreamOpen) {
       await _soundPlayer.startPlayerFromStream(
         codec: Codec.pcm16,
@@ -559,6 +608,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _closePlayerStream() {
+    _cancelPlayerIdleClose();
     _flushPendingAudio();
     if (_isPlayerStreamOpen) {
       _soundPlayer.stopPlayer();
@@ -569,6 +619,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _stopPlayerStreamNow() {
+    _cancelPlayerIdleClose();
     _clearPendingAudio();
     if (_isPlayerStreamOpen) {
       _soundPlayer.stopPlayer();
@@ -593,6 +644,26 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         RegExp(r'rate=(\d+)', caseSensitive: false).firstMatch(mimeType);
     if (match == null) return null;
     return int.tryParse(match.group(1)!);
+  }
+
+  bool _shouldDisplayUserTranscript(String text) {
+    final normalized = text.trim();
+    if (normalized.isEmpty) {
+      return false;
+    }
+
+    final lowered = normalized.toLowerCase();
+    if (lowered == '[noise]' ||
+        lowered == '[silence]' ||
+        lowered == '[inaudible]') {
+      return false;
+    }
+
+    if (RegExp(r'^[.\s]+$').hasMatch(normalized)) {
+      return false;
+    }
+
+    return true;
   }
 
   void _appendGeminiChunk(String chunk) {
@@ -743,6 +814,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _channel = null;
     _stopPlayerStreamNow();
     _audioFlushTimer?.cancel();
+    _playerIdleTimer?.cancel();
     _soundPlayer.closePlayer();
     _scrollController.dispose();
     _cameraController?.dispose();
@@ -1044,7 +1116,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                   child: ElevatedButton.icon(
                     onPressed: _state == AgentState.connecting
                         ? null
-                        : (_isConnected ? _disconnect : _connect),
+                        : (_isConnected ? () async => _disconnect() : _connect),
                     icon: Icon(
                       _isConnected
                           ? Icons.stop_circle_outlined
