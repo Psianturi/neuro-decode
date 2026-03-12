@@ -384,6 +384,21 @@ async def ws_live(websocket: WebSocket) -> None:
     await websocket.accept()
     settings = get_settings()
     profile_id = (websocket.query_params.get("profile_id") or "").strip() or None
+    effective_system_instruction = SYSTEM_INSTRUCTION
+
+    if settings.enable_profile_memory_context and profile_id:
+        try:
+            memory_context = await _load_profile_memory_context(
+                profile_id=profile_id,
+                item_limit=settings.profile_memory_item_limit,
+                session_limit=settings.profile_memory_session_limit,
+            )
+            if memory_context:
+                effective_system_instruction = (
+                    f"{SYSTEM_INSTRUCTION}\n\n{memory_context}"
+                )
+        except Exception as e:
+            print(f"[profile_memory] Failed to prepare memory context: {e}")
 
     if not settings.gemini_api_key:
         await websocket.send_text(
@@ -400,7 +415,7 @@ async def ws_live(websocket: WebSocket) -> None:
     async with GeminiLiveSession(
         model=settings.live_model,
         response_modality=settings.response_modality,
-        system_instruction=SYSTEM_INSTRUCTION,
+        system_instruction=effective_system_instruction,
         voice_name=settings.voice_name,
         enable_input_transcription=settings.enable_input_transcription,
         enable_output_transcription=settings.enable_output_transcription,
@@ -450,29 +465,20 @@ async def ws_live(websocket: WebSocket) -> None:
                 "response_modality": settings.response_modality,
                 "live_model": settings.live_model,
                 "profile_id": profile_id,
+                "profile_memory_enabled": settings.enable_profile_memory_context,
             },
         )
 
-        if settings.enable_profile_memory_context and profile_id:
-            try:
-                memory_context = await _load_profile_memory_context(
-                    profile_id=profile_id,
-                    item_limit=settings.profile_memory_item_limit,
-                    session_limit=settings.profile_memory_session_limit,
-                )
-                if memory_context:
-                    await session.send_observer_note(memory_context, end_of_turn=False)
-                    queue_session_event(
-                        "profile_memory_context_loaded",
-                        source="profile_memory",
-                        metadata={
-                            "profile_id": profile_id,
-                            "memory_item_limit": settings.profile_memory_item_limit,
-                            "session_limit": settings.profile_memory_session_limit,
-                        },
-                    )
-            except Exception as e:
-                print(f"[profile_memory] Failed to load memory context: {e}")
+        if settings.enable_profile_memory_context and profile_id and effective_system_instruction != SYSTEM_INSTRUCTION:
+            queue_session_event(
+                "profile_memory_context_loaded",
+                source="profile_memory",
+                metadata={
+                    "profile_id": profile_id,
+                    "memory_item_limit": settings.profile_memory_item_limit,
+                    "session_limit": settings.profile_memory_session_limit,
+                },
+            )
 
         def can_forward_visual_context() -> bool:
             return not audio_turn_open and not awaiting_model_response and not model_turn_active
