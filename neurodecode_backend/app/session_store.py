@@ -18,16 +18,21 @@ class SessionStore:
         *,
         firestore_enabled: bool,
         firestore_collection: str,
+        firestore_event_collection: str,
         firestore_project: str | None,
         max_memory_items: int = 10,
+        max_memory_events: int = 200,
     ) -> None:
         self._firestore_enabled = firestore_enabled
         self._firestore_collection = firestore_collection
+        self._firestore_event_collection = firestore_event_collection
         self._firestore_project = firestore_project
         self._client: Any | None = None
 
         self._memory: deque[dict[str, object]] = deque(maxlen=max_memory_items)
+        self._memory_events: deque[dict[str, object]] = deque(maxlen=max_memory_events)
         self._memory_lock = asyncio.Lock()
+        self._memory_events_lock = asyncio.Lock()
 
     def _get_client(self):
         if not self._firestore_enabled:
@@ -42,11 +47,27 @@ class SessionStore:
         async with self._memory_lock:
             self._memory.appendleft(dict(record))
 
+    async def _remember_events(self, records: list[dict[str, object]]) -> None:
+        async with self._memory_events_lock:
+            for record in records:
+                self._memory_events.appendleft(dict(record))
+
     def _write_firestore(self, record: dict[str, object]) -> None:
         client = self._get_client()
         if client is None:
             raise RuntimeError("Firestore client unavailable")
         client.collection(self._firestore_collection).add(record)
+
+    def _write_firestore_events(self, records: list[dict[str, object]]) -> None:
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("Firestore client unavailable")
+
+        batch = client.batch()
+        collection = client.collection(self._firestore_event_collection)
+        for record in records:
+            batch.create(collection.document(), record)
+        batch.commit()
 
     def _fetch_firestore_recent(self, limit: int) -> list[dict[str, object]]:
         client = self._get_client()
@@ -76,6 +97,20 @@ class SessionStore:
             await asyncio.to_thread(self._write_firestore, dict(record))
         except Exception as e:
             print(f"[session_store] Firestore write failed; using memory fallback: {e}")
+
+    async def store_events(self, records: list[dict[str, object]]) -> None:
+        if not records:
+            return
+
+        await self._remember_events(records)
+
+        if not self._firestore_enabled:
+            return
+
+        try:
+            await asyncio.to_thread(self._write_firestore_events, [dict(record) for record in records])
+        except Exception as e:
+            print(f"[session_store] Firestore event write failed; using memory fallback: {e}")
 
     async def get_latest(self) -> dict[str, object] | None:
         if self._firestore_enabled:

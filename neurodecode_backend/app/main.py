@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from urllib import error as urlerror
 from urllib import parse as urlparse
 from urllib import request as urlrequest
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -200,6 +201,10 @@ async def _store_session_summary(record: dict[str, object]) -> None:
     await session_store.store(record)
 
 
+async def _store_session_events(records: list[dict[str, object]]) -> None:
+    await session_store.store_events(records)
+
+
 async def _get_latest_session_summary() -> dict[str, object] | None:
     return await session_store.get_latest()
 
@@ -208,6 +213,7 @@ _startup_settings = get_settings()
 session_store = SessionStore(
     firestore_enabled=_startup_settings.firestore_enabled,
     firestore_collection=_startup_settings.firestore_collection,
+    firestore_event_collection=_startup_settings.firestore_event_collection,
     firestore_project=_startup_settings.firestore_project,
     max_memory_items=LATEST_SESSION_MAX_ITEMS,
 )
@@ -301,6 +307,7 @@ async def ws_live(websocket: WebSocket) -> None:
         enable_input_transcription=settings.enable_input_transcription,
         enable_output_transcription=settings.enable_output_transcription,
     ) as session:
+        session_id = uuid4().hex
         session_start = time.monotonic()
         close_reason = "unknown"
         last_activity = time.monotonic()
@@ -311,12 +318,41 @@ async def ws_live(websocket: WebSocket) -> None:
         observer_audio_log: list[str] = []
         transcript_in_log: list[str] = []
         transcript_out_log: list[str] = []
+        session_events: list[dict[str, object]] = []
         audio_observer_task: asyncio.Task[None] | None = None
         vision_observer_task: asyncio.Task[None] | None = None
         audio_turn_open = False
         awaiting_model_response = False
         model_turn_active = False
         print("[ws_live] Session started — Gemini connected")
+
+        def queue_session_event(
+            event_type: str,
+            *,
+            source: str,
+            text: str | None = None,
+            metadata: dict[str, object] | None = None,
+        ) -> None:
+            event: dict[str, object] = {
+                "session_id": session_id,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "event_type": event_type,
+                "source": source,
+            }
+            if text:
+                event["text"] = text
+            if metadata:
+                event["metadata"] = dict(metadata)
+            session_events.append(event)
+
+        queue_session_event(
+            "session_started",
+            source="system",
+            metadata={
+                "response_modality": settings.response_modality,
+                "live_model": settings.live_model,
+            },
+        )
 
         def can_forward_visual_context() -> bool:
             return not audio_turn_open and not awaiting_model_response and not model_turn_active
@@ -327,6 +363,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 if note:
                     print(f"[observer] Audio note triggered")
                     observer_audio_log.append(note)
+                    queue_session_event("observer_audio_trigger", source="audio_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
                     # Do not force a model response mid push-to-talk; keep this as
                     # non-turn-completing context during an active audio turn.
@@ -342,6 +379,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 if note:
                     print(f"[observer] Visual note triggered")
                     observer_visual_log.append(note)
+                    queue_session_event("observer_visual_trigger", source="visual_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
                     # Only let vision notes trigger a new response when the session
                     # is conversationally idle; otherwise keep them as passive context.
@@ -382,11 +420,18 @@ async def ws_live(websocket: WebSocket) -> None:
             duration_minutes = max(1, round(duration_seconds / 60))
             await _store_session_summary(
                 {
+                    "session_id": session_id,
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "duration_seconds": duration_seconds,
                     "duration_minutes": duration_minutes,
                     "close_reason": close_reason,
                     "summary_text": summary,
+                    "stats": {
+                        "audio_trigger_count": len(observer_audio_log),
+                        "visual_trigger_count": len(observer_visual_log),
+                        "transcript_in_count": len(transcript_in_log),
+                        "transcript_out_count": len(transcript_out_log),
+                    },
                     "structured": {
                         "title": structured["TITLE"],
                         "triggers_visual": structured["TRIGGERS_VISUAL"],
@@ -413,6 +458,15 @@ async def ws_live(websocket: WebSocket) -> None:
                     print("[telegram] Summary notification sent")
                 except (urlerror.URLError, RuntimeError) as e:
                     print(f"[telegram] Failed to send summary: {e}")
+
+            queue_session_event(
+                "summary_generated",
+                source="summary_engine",
+                metadata={
+                    "close_reason": close_reason,
+                    "duration_seconds": duration_seconds,
+                },
+            )
 
         async def idle_monitor() -> None:
             """Close the WebSocket if no client activity for IDLE_TIMEOUT_SECONDS."""
@@ -472,11 +526,20 @@ async def ws_live(websocket: WebSocket) -> None:
                         raise ValueError("text.text must be a string")
                     if text.strip():
                         transcript_in_log.append(text.strip())
+                        queue_session_event("client_text_message", source="client_text", text=text.strip())
                     await session.send_text(text, bool(end_of_turn))
                 elif msg_type == "audio_stream_end":
                     print(f"[client\u2192gemini] audio_stream_end — total {audio_chunk_count} chunks, {total_audio_bytes} bytes sent to Gemini")
                     audio_turn_open = False
                     awaiting_model_response = True
+                    queue_session_event(
+                        "audio_turn_submitted",
+                        source="client_audio",
+                        metadata={
+                            "chunk_count": audio_chunk_count,
+                            "total_audio_bytes": total_audio_bytes,
+                        },
+                    )
                     await session.send_audio_stream_end()
                     audio_chunk_count = 0
                     total_audio_bytes = 0
@@ -614,5 +677,18 @@ async def ws_live(websocket: WebSocket) -> None:
 
             if close_reason == "unknown":
                 close_reason = "completed"
+            queue_session_event(
+                "session_closed",
+                source="system",
+                metadata={
+                    "close_reason": close_reason,
+                    "duration_seconds": int(max(1, time.monotonic() - session_start)),
+                    "audio_trigger_count": len(observer_audio_log),
+                    "visual_trigger_count": len(observer_visual_log),
+                    "transcript_in_count": len(transcript_in_log),
+                    "transcript_out_count": len(transcript_out_log),
+                },
+            )
             print(f"[ws_live] Session ending: close_reason={close_reason}")
             await maybe_summarize_and_notify()
+            await _store_session_events(list(session_events))

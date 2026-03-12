@@ -140,6 +140,12 @@ gcloud run services update neurodecode-backend --region asia-southeast1 --update
 7. Telegram format uses `MarkdownV2` with character escaping to avoid API error 400.
 8. Session history is persisted to Firestore (collection `sessions`) with memory fallback when Firestore is unavailable.
 
+## Planning Docs
+For safe incremental development after the live-session baseline:
+
+1. [docs/next_steps_roadmap.md](docs/next_steps_roadmap.md)
+2. [docs/firestore_schema_plan.md](docs/firestore_schema_plan.md)
+
 ## Session Summary API
 Use this endpoint to render History/Insight in Flutter after a session ends.
 

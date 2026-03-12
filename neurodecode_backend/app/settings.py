@@ -22,6 +22,7 @@ class Settings:
 
     firestore_enabled: bool
     firestore_collection: str
+    firestore_event_collection: str
     firestore_project: str | None
 
 
@@ -59,6 +60,9 @@ def get_settings() -> Settings:
         "False",
     }
     firestore_collection = os.getenv("NEURODECODE_FIRESTORE_COLLECTION", "sessions")
+    firestore_event_collection = os.getenv(
+        "NEURODECODE_FIRESTORE_EVENT_COLLECTION", "session_events"
+    )
     firestore_project = os.getenv("NEURODECODE_FIRESTORE_PROJECT") or None
 
     return Settings(
@@ -74,5 +78,6 @@ def get_settings() -> Settings:
         telegram_chat_id=telegram_chat_id,
         firestore_enabled=firestore_enabled,
         firestore_collection=firestore_collection,
+        firestore_event_collection=firestore_event_collection,
         firestore_project=firestore_project,
     )
