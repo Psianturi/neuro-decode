@@ -16,6 +16,8 @@ from google import genai
 
 from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
+from app.memory_context import build_private_memory_context
+from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.session_store import SessionStore
 from app.settings import get_settings
@@ -217,6 +219,12 @@ session_store = SessionStore(
     firestore_project=_startup_settings.firestore_project,
     max_memory_items=LATEST_SESSION_MAX_ITEMS,
 )
+profile_store = ProfileStore(
+    firestore_enabled=_startup_settings.firestore_enabled,
+    profile_collection=_startup_settings.firestore_profile_collection,
+    profile_memory_collection=_startup_settings.firestore_profile_memory_collection,
+    firestore_project=_startup_settings.firestore_project,
+)
 
 
 def _format_telegram_message(*, duration_seconds: int, summary_text: str) -> str:
@@ -279,6 +287,74 @@ async def sessions_list() -> dict[str, object]:
         "status": "ok",
         "count": len(items),
         "sessions": items,
+    }
+
+
+@app.get("/profiles/{profile_id}")
+async def profile_get(profile_id: str) -> dict[str, object]:
+    profile = await profile_store.get_profile(profile_id)
+    if profile is None:
+        return {
+            "status": "empty",
+            "message": "Profile not found",
+            "profile_id": profile_id,
+        }
+    return {"status": "ok", "profile": profile}
+
+
+@app.put("/profiles/{profile_id}")
+async def profile_upsert(profile_id: str, payload: dict[str, object]) -> dict[str, object]:
+    record = dict(payload)
+    record["profile_id"] = profile_id
+    record["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    await profile_store.upsert_profile(profile_id, record)
+    return {"status": "ok", "profile": record}
+
+
+@app.get("/profiles/{profile_id}/memory")
+async def profile_memory_list(profile_id: str, limit: int = 10) -> dict[str, object]:
+    safe_limit = max(1, min(limit, 50))
+    items = await profile_store.list_profile_memory(profile_id, safe_limit)
+    return {
+        "status": "ok",
+        "profile_id": profile_id,
+        "count": len(items),
+        "items": items,
+    }
+
+
+@app.post("/profiles/{profile_id}/memory")
+async def profile_memory_add(profile_id: str, payload: dict[str, object]) -> dict[str, object]:
+    record = dict(payload)
+    record["profile_id"] = profile_id
+    record.setdefault("active", True)
+    record.setdefault("confidence", "medium")
+    record["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    await profile_store.add_profile_memory(profile_id, record)
+    return {"status": "ok", "item": record}
+
+
+@app.get("/profiles/{profile_id}/memory-context")
+async def profile_memory_context(profile_id: str) -> dict[str, object]:
+    profile = await profile_store.get_profile(profile_id)
+    items = await profile_store.list_profile_memory(profile_id, 5)
+    sessions = [
+        item
+        for item in await session_store.list_recent(5)
+        if item.get("profile_id") == profile_id
+    ]
+    context = build_private_memory_context(
+        profile=profile,
+        profile_memory_items=items,
+        recent_sessions=sessions,
+    )
+    return {
+        "status": "ok",
+        "profile_id": profile_id,
+        "profile_found": profile is not None,
+        "memory_item_count": len(items),
+        "recent_session_count": len(sessions),
+        "context": context,
     }
 
 
