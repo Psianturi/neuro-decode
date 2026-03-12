@@ -22,10 +22,12 @@ class LiveAgentScreen extends StatefulWidget {
     super.key,
     required this.cameras,
     required this.observerEnabled,
+    this.profileId,
   });
 
   final List<CameraDescription> cameras;
   final bool observerEnabled;
+  final String? profileId;
 
   @override
   State<LiveAgentScreen> createState() => _LiveAgentScreenState();
@@ -142,9 +144,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _isManualClose = false;
     _backendFatalError = false;
     _setStateLabel(AgentState.connecting);
-    _logDebug('ws_event', 'connecting ${AppConfig.wsEndpoint}');
+    final wsUri = AppConfig.liveWsUri(profileId: widget.profileId);
+    _logDebug('ws_event', 'connecting $wsUri');
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(AppConfig.wsEndpoint));
+      _channel = WebSocketChannel.connect(wsUri);
       _wsSub = _channel!.stream.listen(
         _onMessageReceived,
         onDone: () {
@@ -157,7 +160,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
               if (mounted &&
                   !_isConnected &&
                   !_isManualClose &&
-                  !_backendFatalError) _connect();
+                  !_backendFatalError) {
+                _connect();
+              }
             });
           }
         },
@@ -172,7 +177,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
               if (mounted &&
                   !_isConnected &&
                   !_isManualClose &&
-                  !_backendFatalError) _connect();
+                  !_backendFatalError) {
+                _connect();
+              }
             });
           }
         },
@@ -314,7 +321,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
           );
         }
       }
-    } catch (e, stackTrace) {
+    } catch (e) {
       _logDebug('ws_event', 'ERROR processing message: $e');
       _addLog('Error', 'Failed to process message: $e');
     }

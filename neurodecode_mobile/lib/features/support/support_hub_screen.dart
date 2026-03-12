@@ -21,6 +21,13 @@ class SupportHubScreen extends StatefulWidget {
 class _SupportHubScreenState extends State<SupportHubScreen> {
   bool _observerEnabled = false;
   final SessionSummaryService _summaryService = SessionSummaryService();
+  final TextEditingController _profileIdController = TextEditingController();
+
+  @override
+  void dispose() {
+    _profileIdController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,17 +75,51 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               },
             ),
           ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: NeuroColors.surface,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Profile ID',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Optional for local testing. Fill this with a real child or caregiver profile ID when you want personalized memory retrieval.',
+                  style: TextStyle(color: NeuroColors.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _profileIdController,
+                  decoration: const InputDecoration(
+                    hintText: 'example: demo-child-001',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.done,
+                  autocorrect: false,
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 18),
           SizedBox(
             height: 56,
             child: ElevatedButton.icon(
               onPressed: () async {
+                final profileId = _profileIdController.text.trim();
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => LiveAgentScreen(
                       cameras: widget.cameras,
                       observerEnabled: _observerEnabled,
+                      profileId: profileId.isEmpty ? null : profileId,
                     ),
                   ),
                 );
