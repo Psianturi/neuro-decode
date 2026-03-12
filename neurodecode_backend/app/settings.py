@@ -14,6 +14,9 @@ class Settings:
 
     enable_input_transcription: bool
     enable_output_transcription: bool
+    enable_profile_memory_context: bool
+    profile_memory_item_limit: int
+    profile_memory_session_limit: int
 
     summary_enabled: bool
     summary_model: str
@@ -45,6 +48,17 @@ def get_settings() -> Settings:
     enable_output_transcription = os.getenv(
         "NEURODECODE_OUTPUT_TRANSCRIPTION", "1"
     ).strip() not in {"0", "false", "False"}
+    enable_profile_memory_context = os.getenv(
+        "NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT", "0"
+    ).strip() not in {"0", "false", "False"}
+    profile_memory_item_limit = max(
+        1,
+        min(int(os.getenv("NEURODECODE_PROFILE_MEMORY_ITEM_LIMIT", "5")), 10),
+    )
+    profile_memory_session_limit = max(
+        1,
+        min(int(os.getenv("NEURODECODE_PROFILE_MEMORY_SESSION_LIMIT", "3")), 10),
+    )
 
     summary_enabled = os.getenv("NEURODECODE_SUMMARY_ENABLED", "1").strip() not in {
         "0",
@@ -80,6 +94,9 @@ def get_settings() -> Settings:
         voice_name=voice_name,
         enable_input_transcription=enable_input_transcription,
         enable_output_transcription=enable_output_transcription,
+        enable_profile_memory_context=enable_profile_memory_context,
+        profile_memory_item_limit=profile_memory_item_limit,
+        profile_memory_session_limit=profile_memory_session_limit,
         summary_enabled=summary_enabled,
         summary_model=summary_model,
         telegram_bot_token=telegram_bot_token,

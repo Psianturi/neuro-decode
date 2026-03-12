@@ -211,6 +211,27 @@ async def _get_latest_session_summary() -> dict[str, object] | None:
     return await session_store.get_latest()
 
 
+async def _load_profile_memory_context(
+    *,
+    profile_id: str,
+    item_limit: int,
+    session_limit: int,
+) -> str:
+    profile = await profile_store.get_profile(profile_id)
+    memory_items = await profile_store.list_profile_memory(profile_id, item_limit)
+    recent_sessions = [
+        item
+        for item in await session_store.list_recent(max(session_limit * 3, 10))
+        if item.get("profile_id") == profile_id
+    ][:session_limit]
+
+    return build_private_memory_context(
+        profile=profile,
+        profile_memory_items=memory_items,
+        recent_sessions=recent_sessions,
+    )
+
+
 _startup_settings = get_settings()
 session_store = SessionStore(
     firestore_enabled=_startup_settings.firestore_enabled,
@@ -362,6 +383,7 @@ async def profile_memory_context(profile_id: str) -> dict[str, object]:
 async def ws_live(websocket: WebSocket) -> None:
     await websocket.accept()
     settings = get_settings()
+    profile_id = (websocket.query_params.get("profile_id") or "").strip() or None
 
     if not settings.gemini_api_key:
         await websocket.send_text(
@@ -427,8 +449,30 @@ async def ws_live(websocket: WebSocket) -> None:
             metadata={
                 "response_modality": settings.response_modality,
                 "live_model": settings.live_model,
+                "profile_id": profile_id,
             },
         )
+
+        if settings.enable_profile_memory_context and profile_id:
+            try:
+                memory_context = await _load_profile_memory_context(
+                    profile_id=profile_id,
+                    item_limit=settings.profile_memory_item_limit,
+                    session_limit=settings.profile_memory_session_limit,
+                )
+                if memory_context:
+                    await session.send_observer_note(memory_context, end_of_turn=False)
+                    queue_session_event(
+                        "profile_memory_context_loaded",
+                        source="profile_memory",
+                        metadata={
+                            "profile_id": profile_id,
+                            "memory_item_limit": settings.profile_memory_item_limit,
+                            "session_limit": settings.profile_memory_session_limit,
+                        },
+                    )
+            except Exception as e:
+                print(f"[profile_memory] Failed to load memory context: {e}")
 
         def can_forward_visual_context() -> bool:
             return not audio_turn_open and not awaiting_model_response and not model_turn_active
@@ -497,6 +541,7 @@ async def ws_live(websocket: WebSocket) -> None:
             await _store_session_summary(
                 {
                     "session_id": session_id,
+                    "profile_id": profile_id,
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "duration_seconds": duration_seconds,
                     "duration_minutes": duration_minutes,
