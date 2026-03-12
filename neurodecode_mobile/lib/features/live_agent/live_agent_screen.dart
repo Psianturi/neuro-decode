@@ -22,11 +22,13 @@ class LiveAgentScreen extends StatefulWidget {
     super.key,
     required this.cameras,
     required this.observerEnabled,
+    required this.userId,
     this.profileId,
   });
 
   final List<CameraDescription> cameras;
   final bool observerEnabled;
+  final String userId;
   final String? profileId;
 
   @override
@@ -144,7 +146,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _isManualClose = false;
     _backendFatalError = false;
     _setStateLabel(AgentState.connecting);
-    final wsUri = AppConfig.liveWsUri(profileId: widget.profileId);
+    final wsUri = AppConfig.liveWsUri(
+      userId: widget.userId,
+      profileId: widget.profileId,
+    );
     _logDebug('ws_event', 'connecting $wsUri');
     try {
       _channel = WebSocketChannel.connect(wsUri);

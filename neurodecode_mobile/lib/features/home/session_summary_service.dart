@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../config/app_config.dart';
+import '../../config/app_identity_store.dart';
 
 class SessionSummary {
   const SessionSummary({
@@ -87,8 +88,20 @@ class SessionSummary {
 }
 
 class SessionSummaryService {
-  Uri _buildUri(String path) {
-    return Uri.parse('https://${AppConfig.backendUrl}$path');
+  SessionSummaryService({AppIdentityStore? identityStore})
+      : _identityStore = identityStore ?? AppIdentityStore();
+
+  final AppIdentityStore _identityStore;
+
+  Future<Uri> _buildUri(String path) async {
+    final userId = await _identityStore.getOrCreateUserId();
+    final profileId = await _identityStore.getActiveProfileId();
+    return Uri.parse('https://${AppConfig.backendUrl}$path').replace(
+      queryParameters: {
+        'user_id': userId,
+        if (profileId != null && profileId.isNotEmpty) 'profile_id': profileId,
+      },
+    );
   }
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {
@@ -118,7 +131,7 @@ class SessionSummaryService {
   }
 
   Future<SessionSummary?> fetchLatest() async {
-    final decoded = await _getJson(_buildUri('/sessions/latest'));
+    final decoded = await _getJson(await _buildUri('/sessions/latest'));
 
     final status = (decoded['status'] ?? '').toString();
     if (status == 'empty') {
@@ -134,7 +147,7 @@ class SessionSummaryService {
   }
 
   Future<List<SessionSummary>> fetchAll() async {
-    final decoded = await _getJson(_buildUri('/sessions'));
+    final decoded = await _getJson(await _buildUri('/sessions'));
 
     final sessionsRaw = decoded['sessions'];
     if (sessionsRaw is! List) {

@@ -34,6 +34,19 @@ class SessionStore:
         self._memory_lock = asyncio.Lock()
         self._memory_events_lock = asyncio.Lock()
 
+    def _matches_scope(
+        self,
+        record: dict[str, object],
+        *,
+        user_id: str | None,
+        profile_id: str | None,
+    ) -> bool:
+        if user_id and record.get("user_id") != user_id:
+            return False
+        if profile_id and record.get("profile_id") != profile_id:
+            return False
+        return True
+
     def _get_client(self):
         if not self._firestore_enabled:
             return None
@@ -69,16 +82,25 @@ class SessionStore:
             batch.create(collection.document(), record)
         batch.commit()
 
-    def _fetch_firestore_recent(self, limit: int) -> list[dict[str, object]]:
+    def _fetch_firestore_recent(
+        self,
+        limit: int,
+        *,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> list[dict[str, object]]:
         client = self._get_client()
         if client is None:
             raise RuntimeError("Firestore client unavailable")
 
-        query = (
-            client.collection(self._firestore_collection)
-            .order_by("timestamp_utc", direction=firestore.Query.DESCENDING)
-            .limit(limit)
-        )
+        query = client.collection(self._firestore_collection)
+        if user_id:
+            query = query.where("user_id", "==", user_id)
+        if profile_id:
+            query = query.where("profile_id", "==", profile_id)
+        query = query.order_by(
+            "timestamp_utc", direction=firestore.Query.DESCENDING
+        ).limit(limit)
 
         out: list[dict[str, object]] = []
         for doc in query.stream():
@@ -112,26 +134,57 @@ class SessionStore:
         except Exception as e:
             print(f"[session_store] Firestore event write failed; using memory fallback: {e}")
 
-    async def get_latest(self) -> dict[str, object] | None:
+    async def get_latest(
+        self,
+        *,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> dict[str, object] | None:
         if self._firestore_enabled:
             try:
-                items = await asyncio.to_thread(self._fetch_firestore_recent, 1)
+                items = await asyncio.to_thread(
+                    self._fetch_firestore_recent,
+                    1,
+                    user_id=user_id,
+                    profile_id=profile_id,
+                )
                 if items:
                     return items[0]
             except Exception as e:
                 print(f"[session_store] Firestore read latest failed; using memory fallback: {e}")
 
         async with self._memory_lock:
-            if not self._memory:
+            items = [
+                dict(item)
+                for item in self._memory
+                if self._matches_scope(item, user_id=user_id, profile_id=profile_id)
+            ]
+            if not items:
                 return None
-            return dict(self._memory[0])
+            return items[0]
 
-    async def list_recent(self, limit: int) -> list[dict[str, object]]:
+    async def list_recent(
+        self,
+        limit: int,
+        *,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> list[dict[str, object]]:
         if self._firestore_enabled:
             try:
-                return await asyncio.to_thread(self._fetch_firestore_recent, limit)
+                return await asyncio.to_thread(
+                    self._fetch_firestore_recent,
+                    limit,
+                    user_id=user_id,
+                    profile_id=profile_id,
+                )
             except Exception as e:
                 print(f"[session_store] Firestore read list failed; using memory fallback: {e}")
 
         async with self._memory_lock:
-            return [dict(item) for item in list(self._memory)[:limit]]
+            items = [
+                dict(item)
+                for item in self._memory
+                if self._matches_scope(item, user_id=user_id, profile_id=profile_id)
+            ]
+            return items[:limit]

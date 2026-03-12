@@ -207,22 +207,34 @@ async def _store_session_events(records: list[dict[str, object]]) -> None:
     await session_store.store_events(records)
 
 
-async def _get_latest_session_summary() -> dict[str, object] | None:
-    return await session_store.get_latest()
+async def _get_latest_session_summary(
+    *,
+    user_id: str | None = None,
+    profile_id: str | None = None,
+) -> dict[str, object] | None:
+    return await session_store.get_latest(user_id=user_id, profile_id=profile_id)
 
 
 async def _load_profile_memory_context(
     *,
+    user_id: str,
     profile_id: str,
     item_limit: int,
     session_limit: int,
 ) -> str:
-    profile = await profile_store.get_profile(profile_id)
-    memory_items = await profile_store.list_profile_memory(profile_id, item_limit)
+    profile = await profile_store.get_profile(profile_id, user_id=user_id)
+    memory_items = await profile_store.list_profile_memory(
+        profile_id,
+        item_limit,
+        user_id=user_id,
+    )
     recent_sessions = [
         item
-        for item in await session_store.list_recent(max(session_limit * 3, 10))
-        if item.get("profile_id") == profile_id
+        for item in await session_store.list_recent(
+            max(session_limit * 3, 10),
+            user_id=user_id,
+            profile_id=profile_id,
+        )
     ][:session_limit]
 
     return build_private_memory_context(
@@ -294,16 +306,26 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/sessions/latest")
-async def sessions_latest() -> dict[str, object]:
-    latest = await _get_latest_session_summary()
+async def sessions_latest(
+    user_id: str | None = None,
+    profile_id: str | None = None,
+) -> dict[str, object]:
+    latest = await _get_latest_session_summary(user_id=user_id, profile_id=profile_id)
     if latest is None:
         return {"status": "empty", "message": "No completed session summary yet"}
     return {"status": "ok", "session": latest}
 
 
 @app.get("/sessions")
-async def sessions_list() -> dict[str, object]:
-    items = await session_store.list_recent(LATEST_SESSION_MAX_ITEMS)
+async def sessions_list(
+    user_id: str | None = None,
+    profile_id: str | None = None,
+) -> dict[str, object]:
+    items = await session_store.list_recent(
+        LATEST_SESSION_MAX_ITEMS,
+        user_id=user_id,
+        profile_id=profile_id,
+    )
     return {
         "status": "ok",
         "count": len(items),
@@ -312,8 +334,8 @@ async def sessions_list() -> dict[str, object]:
 
 
 @app.get("/profiles/{profile_id}")
-async def profile_get(profile_id: str) -> dict[str, object]:
-    profile = await profile_store.get_profile(profile_id)
+async def profile_get(profile_id: str, user_id: str | None = None) -> dict[str, object]:
+    profile = await profile_store.get_profile(profile_id, user_id=user_id)
     if profile is None:
         return {
             "status": "empty",
@@ -324,18 +346,32 @@ async def profile_get(profile_id: str) -> dict[str, object]:
 
 
 @app.put("/profiles/{profile_id}")
-async def profile_upsert(profile_id: str, payload: dict[str, object]) -> dict[str, object]:
+async def profile_upsert(
+    profile_id: str,
+    payload: dict[str, object],
+    user_id: str | None = None,
+) -> dict[str, object]:
     record = dict(payload)
     record["profile_id"] = profile_id
+    if user_id:
+        record["user_id"] = user_id
     record["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    await profile_store.upsert_profile(profile_id, record)
+    await profile_store.upsert_profile(profile_id, record, user_id=user_id)
     return {"status": "ok", "profile": record}
 
 
 @app.get("/profiles/{profile_id}/memory")
-async def profile_memory_list(profile_id: str, limit: int = 10) -> dict[str, object]:
+async def profile_memory_list(
+    profile_id: str,
+    limit: int = 10,
+    user_id: str | None = None,
+) -> dict[str, object]:
     safe_limit = max(1, min(limit, 50))
-    items = await profile_store.list_profile_memory(profile_id, safe_limit)
+    items = await profile_store.list_profile_memory(
+        profile_id,
+        safe_limit,
+        user_id=user_id,
+    )
     return {
         "status": "ok",
         "profile_id": profile_id,
@@ -345,25 +381,30 @@ async def profile_memory_list(profile_id: str, limit: int = 10) -> dict[str, obj
 
 
 @app.post("/profiles/{profile_id}/memory")
-async def profile_memory_add(profile_id: str, payload: dict[str, object]) -> dict[str, object]:
+async def profile_memory_add(
+    profile_id: str,
+    payload: dict[str, object],
+    user_id: str | None = None,
+) -> dict[str, object]:
     record = dict(payload)
     record["profile_id"] = profile_id
+    if user_id:
+        record["user_id"] = user_id
     record.setdefault("active", True)
     record.setdefault("confidence", "medium")
     record["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    await profile_store.add_profile_memory(profile_id, record)
+    await profile_store.add_profile_memory(profile_id, record, user_id=user_id)
     return {"status": "ok", "item": record}
 
 
 @app.get("/profiles/{profile_id}/memory-context")
-async def profile_memory_context(profile_id: str) -> dict[str, object]:
-    profile = await profile_store.get_profile(profile_id)
-    items = await profile_store.list_profile_memory(profile_id, 5)
-    sessions = [
-        item
-        for item in await session_store.list_recent(5)
-        if item.get("profile_id") == profile_id
-    ]
+async def profile_memory_context(
+    profile_id: str,
+    user_id: str | None = None,
+) -> dict[str, object]:
+    profile = await profile_store.get_profile(profile_id, user_id=user_id)
+    items = await profile_store.list_profile_memory(profile_id, 5, user_id=user_id)
+    sessions = await session_store.list_recent(5, user_id=user_id, profile_id=profile_id)
     context = build_private_memory_context(
         profile=profile,
         profile_memory_items=items,
@@ -383,12 +424,14 @@ async def profile_memory_context(profile_id: str) -> dict[str, object]:
 async def ws_live(websocket: WebSocket) -> None:
     await websocket.accept()
     settings = get_settings()
+    user_id = (websocket.query_params.get("user_id") or "").strip() or None
     profile_id = (websocket.query_params.get("profile_id") or "").strip() or None
     effective_system_instruction = SYSTEM_INSTRUCTION
 
-    if settings.enable_profile_memory_context and profile_id:
+    if settings.enable_profile_memory_context and user_id and profile_id:
         try:
             memory_context = await _load_profile_memory_context(
+                user_id=user_id,
                 profile_id=profile_id,
                 item_limit=settings.profile_memory_item_limit,
                 session_limit=settings.profile_memory_session_limit,
@@ -452,6 +495,10 @@ async def ws_live(websocket: WebSocket) -> None:
                 "event_type": event_type,
                 "source": source,
             }
+            if user_id:
+                event["user_id"] = user_id
+            if profile_id:
+                event["profile_id"] = profile_id
             if text:
                 event["text"] = text
             if metadata:
@@ -464,16 +511,18 @@ async def ws_live(websocket: WebSocket) -> None:
             metadata={
                 "response_modality": settings.response_modality,
                 "live_model": settings.live_model,
+                "user_id": user_id,
                 "profile_id": profile_id,
                 "profile_memory_enabled": settings.enable_profile_memory_context,
             },
         )
 
-        if settings.enable_profile_memory_context and profile_id and effective_system_instruction != SYSTEM_INSTRUCTION:
+        if settings.enable_profile_memory_context and user_id and profile_id and effective_system_instruction != SYSTEM_INSTRUCTION:
             queue_session_event(
                 "profile_memory_context_loaded",
                 source="profile_memory",
                 metadata={
+                    "user_id": user_id,
                     "profile_id": profile_id,
                     "memory_item_limit": settings.profile_memory_item_limit,
                     "session_limit": settings.profile_memory_session_limit,
@@ -547,6 +596,7 @@ async def ws_live(websocket: WebSocket) -> None:
             await _store_session_summary(
                 {
                     "session_id": session_id,
+                    "user_id": user_id,
                     "profile_id": profile_id,
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "duration_seconds": duration_seconds,

@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+import '../../config/app_identity_store.dart';
 import '../../theme/app_theme.dart';
 import '../home/history_insights_screen.dart';
 import '../home/session_summary_service.dart';
@@ -21,7 +22,22 @@ class SupportHubScreen extends StatefulWidget {
 class _SupportHubScreenState extends State<SupportHubScreen> {
   bool _observerEnabled = false;
   final SessionSummaryService _summaryService = SessionSummaryService();
+  final AppIdentityStore _identityStore = AppIdentityStore();
   final TextEditingController _profileIdController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStoredProfileId();
+  }
+
+  Future<void> _loadStoredProfileId() async {
+    final profileId = await _identityStore.getActiveProfileId();
+    if (!mounted || profileId == null) {
+      return;
+    }
+    _profileIdController.text = profileId;
+  }
 
   @override
   void dispose() {
@@ -113,12 +129,18 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
             child: ElevatedButton.icon(
               onPressed: () async {
                 final profileId = _profileIdController.text.trim();
+                final userId = await _identityStore.getOrCreateUserId();
+                await _identityStore.setActiveProfileId(
+                  profileId.isEmpty ? null : profileId,
+                );
                 await Navigator.push(
+                  // ignore: use_build_context_synchronously
                   context,
                   MaterialPageRoute(
                     builder: (_) => LiveAgentScreen(
                       cameras: widget.cameras,
                       observerEnabled: _observerEnabled,
+                      userId: userId,
                       profileId: profileId.isEmpty ? null : profileId,
                     ),
                   ),
