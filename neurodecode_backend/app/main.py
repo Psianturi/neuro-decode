@@ -777,18 +777,32 @@ async def ws_live(websocket: WebSocket) -> None:
             # them into ~80 ms blocks greatly reduces JSON + base64 overhead on
             # the mobile client and prevents UI-thread contention.
             _audio_pending = bytearray()
-            _AUDIO_BATCH_MIN = 5760 
+            _AUDIO_BATCH_MIN = 5760
+            _AUDIO_BYTES_PER_SECOND = 24000 * 2
+            _AUDIO_TARGET_LEAD_SECONDS = 0.24
             _audio_batch_count = 0
+            _audio_playout_deadline: float | None = None
 
             async def _flush_audio_pending() -> None:
-                nonlocal _audio_pending, _audio_batch_count
+                nonlocal _audio_pending, _audio_batch_count, _audio_playout_deadline
                 if not _audio_pending:
                     return
                 chunk = bytes(_audio_pending)
                 _audio_pending = bytearray()
                 _audio_batch_count += 1
+                chunk_duration_seconds = len(chunk) / _AUDIO_BYTES_PER_SECOND
+                now = time.monotonic()
+                if _audio_playout_deadline is None or now > _audio_playout_deadline:
+                    _audio_playout_deadline = now
+                send_deadline = max(
+                    now,
+                    _audio_playout_deadline - _AUDIO_TARGET_LEAD_SECONDS,
+                )
+                pacing_delay = send_deadline - now
+                if pacing_delay > 0:
+                    await asyncio.sleep(pacing_delay)
                 print(
-                    f"[gemini→client] model_audio_batch #{_audio_batch_count} bytes={len(chunk)} pending=0"
+                    f"[gemini→client] model_audio_batch #{_audio_batch_count} bytes={len(chunk)} pending=0 pacing_ms={int(max(pacing_delay, 0) * 1000)}"
                 )
                 await websocket.send_text(
                     json.dumps(
@@ -798,6 +812,10 @@ async def ws_live(websocket: WebSocket) -> None:
                             "mime_type": "audio/pcm;rate=24000",
                         }
                     )
+                )
+                sent_at = time.monotonic()
+                _audio_playout_deadline = (
+                    max(_audio_playout_deadline, sent_at) + chunk_duration_seconds
                 )
 
             # The underlying Live SDK receive stream may complete after a turn.
@@ -840,6 +858,7 @@ async def ws_live(websocket: WebSocket) -> None:
                             )
                     elif out.type == "model_audio_end":
                         await _flush_audio_pending()
+                        _audio_playout_deadline = None
                         awaiting_model_response = False
                         model_turn_active = False
                         last_activity = time.monotonic()
@@ -847,6 +866,7 @@ async def ws_live(websocket: WebSocket) -> None:
                         await websocket.send_text(json.dumps({"type": "model_audio_end"}))
                     elif out.type == "interrupted":
                         _audio_pending = bytearray()  # discard on interruption
+                        _audio_playout_deadline = None
                         awaiting_model_response = False
                         model_turn_active = False
                         last_activity = time.monotonic()
