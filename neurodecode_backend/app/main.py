@@ -70,6 +70,8 @@ def _looks_like_internal_note(text: str) -> bool:
     markers = (
         "[visual observer note]",
         "[audio observer note]",
+        "visual observer note",
+        "audio observer note",
         "internal sensor note",
         "private context",
     )
@@ -84,6 +86,8 @@ def _sanitize_caregiver_text(text: str) -> str:
     patterns = (
         r"\[\s*visual observer note\s*\]",
         r"\[\s*audio observer note\s*\]",
+        r"visual observer note\s*:",
+        r"audio observer note\s*:",
         r"internal sensor note\s*\([^)]*\)\s*:",
         r"internal sensor note\s*:",
         r"observer note\s*:",
@@ -480,6 +484,7 @@ async def ws_live(websocket: WebSocket) -> None:
         session_events: list[dict[str, object]] = []
         audio_observer_task: asyncio.Task[None] | None = None
         vision_observer_task: asyncio.Task[None] | None = None
+        last_vision_note_text = ""
         audio_turn_open = False
         awaiting_model_response = False
         model_turn_active = False
@@ -552,16 +557,21 @@ async def ws_live(websocket: WebSocket) -> None:
                 print(f"[observer] Audio observer error: {e}")
 
         async def run_vision_observer(frame_b64: str) -> None:
+            nonlocal last_vision_note_text
             try:
                 note = await asyncio.to_thread(ai_engine.process_vision_frame, frame_b64)
                 if note:
+                    normalized_note = note.strip().lower()
+                    if normalized_note and normalized_note == last_vision_note_text:
+                        return
+                    last_vision_note_text = normalized_note
                     print(f"[observer] Visual note triggered")
                     observer_visual_log.append(note)
                     queue_session_event("observer_visual_trigger", source="visual_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    # Only let vision notes trigger a new response when the session
-                    # is conversationally idle; otherwise keep them as passive context.
-                    await session.send_observer_note(note, end_of_turn=can_forward_visual_context())
+                    # Keep observer notes as passive context. This avoids repeated,
+                    # unsolicited model responses when observer mode is enabled.
+                    await session.send_observer_note(note, end_of_turn=False)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -777,6 +787,8 @@ async def ws_live(websocket: WebSocket) -> None:
                         )
                     elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                         if out.text:
+                            if out.type in {"model_text", "transcript_out"} and _looks_like_internal_note(out.text):
+                                continue
                             outgoing_text = out.text
                             if out.type in {"model_text", "transcript_out"}:
                                 outgoing_text = _sanitize_caregiver_text(outgoing_text)

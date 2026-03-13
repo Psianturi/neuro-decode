@@ -655,7 +655,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     final lowered = normalized.toLowerCase();
     if (lowered == '[noise]' ||
         lowered == '[silence]' ||
-        lowered == '[inaudible]') {
+        lowered == '[inaudible]' ||
+        lowered == '<noise>' ||
+        lowered == '<silence>' ||
+        lowered == '<inaudible>') {
       return false;
     }
 
