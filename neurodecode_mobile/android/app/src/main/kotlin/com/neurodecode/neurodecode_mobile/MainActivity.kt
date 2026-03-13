@@ -48,10 +48,11 @@ class MainActivity : FlutterActivity() {
 							result.success(null)
 							return@setMethodCallHandler
 						}
-						while (!pcmQueue.offerLast(bytes)) {
+						while (!pcmQueue.offerLast(bytes, 15, TimeUnit.MILLISECONDS)) {
 							val dropped = pcmQueue.pollFirst()
 							Log.w(logTag, "Dropping stale PCM chunk bytes=${dropped?.size ?: 0}")
 						}
+						Log.d(logTag, "Queued PCM chunk bytes=${bytes.size} queueDepth=${pcmQueue.size}")
 						result.success(null)
 					}
 

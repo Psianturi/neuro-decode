@@ -42,6 +42,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       MethodChannel('neurodecode/live_audio');
   static const int _geminiOutputSampleRate = 24000;
   static const int _geminiOutputChannels = 1;
+  static const int _maxPlaybackChunkBytes = 5760;
   static const int _audioFlushThresholdBytes =
       5760; // ~120 ms @24kHz mono PCM16
   static const int _audioPrebufferBytes = 11520; // ~240 ms @24kHz mono PCM16
@@ -607,7 +608,28 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     if (_pendingPcmBuffer.length == 0) return;
 
     final pcm = _pendingPcmBuffer.takeBytes();
-    _feedAudio(pcm);
+    for (final chunk in _splitPlaybackChunks(pcm)) {
+      _feedAudio(chunk);
+    }
+  }
+
+  Iterable<Uint8List> _splitPlaybackChunks(Uint8List pcm) sync* {
+    if (pcm.isEmpty) {
+      return;
+    }
+
+    if (pcm.length <= _maxPlaybackChunkBytes) {
+      yield pcm;
+      return;
+    }
+
+    for (var offset = 0;
+        offset < pcm.length;
+        offset += _maxPlaybackChunkBytes) {
+      final end =
+          (offset + _maxPlaybackChunkBytes).clamp(0, pcm.length).toInt();
+      yield Uint8List.sublistView(pcm, offset, end);
+    }
   }
 
   void _cancelPlayerIdleClose() {
