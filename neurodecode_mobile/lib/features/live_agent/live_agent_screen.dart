@@ -39,6 +39,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   static const int _geminiOutputSampleRate = 24000;
   static const int _geminiOutputChannels = 1;
   static const int _audioFlushThresholdBytes = 7680;
+  static const int _audioPrebufferBytes = 12000; // 0.5 seconds @24kHz mono (24000 sample * 2 byte)
+  static const int _audioDropFrameBytes = 48000; // 2 seconds @24kHz mono
   static const Duration _audioFlushInterval = Duration(milliseconds: 45);
   static const int _minTurnAudioBytes = 8000;
   static const Duration _minTurnDuration = Duration(milliseconds: 350);
@@ -290,9 +292,15 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
           _logDebug(
               'player_event', 'sample rate updated to ${_playerSampleRate}Hz');
         }
+        // PATCH: Clear buffer at the start of a new turn (first model_audio after turn complete)
+        if (_pendingPcmBuffer.length > 0 && _lastGeminiChunkAt == null) {
+          _logDebug('audio_patch', 'Clearing buffer at new turn start');
+          _clearPendingAudio();
+        }
         if (b64.isNotEmpty) {
           _queueAudioChunk(Uint8List.fromList(base64Decode(b64)));
         }
+        _lastGeminiChunkAt = DateTime.now();
         return;
       }
 
@@ -545,14 +553,31 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   void _queueAudioChunk(Uint8List pcm) {
     if (pcm.isEmpty) return;
 
+
+    // PATCH: Drop frame policy if buffer is too long (>2 seconds of audio)
+    if (_pendingPcmBuffer.length > _audioDropFrameBytes) {
+      _logDebug('audio_patch', 'Drop frame: buffer >2 seconds, clearing ${_pendingPcmBuffer.length} bytes');
+      _clearPendingAudio();
+    }
+
     _pendingPcmBuffer.add(pcm);
+
+    // PATCH: Pre-buffer at least 0.5 seconds before playback
+    if (!_isPlayerStreamOpen && _pendingPcmBuffer.length < _audioPrebufferBytes) {
+      _logDebug('audio_patch', 'Pre-buffering: ${_pendingPcmBuffer.length} bytes');
+      // Wait until buffer is sufficient before starting playback
+      return;
+    }
+
     if (_pendingPcmBuffer.length >= _audioFlushThresholdBytes) {
+      _logDebug('audio_patch', 'Flush: buffer >= threshold (${_pendingPcmBuffer.length} bytes)');
       _flushPendingAudio();
       return;
     }
 
     _audioFlushTimer ??= Timer(_audioFlushInterval, () {
       _audioFlushTimer = null;
+      _logDebug('audio_patch', 'Flush: interval (${_pendingPcmBuffer.length} bytes)');
       _flushPendingAudio();
     });
   }
