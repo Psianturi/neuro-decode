@@ -67,7 +67,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
-  static const int _playerBufferSize = 8195;
+  static const int _playerBufferSize = 8192;
   final BytesBuilder _pendingPcmBuffer = BytesBuilder(copy: false);
   Timer? _audioFlushTimer;
   Timer? _playerIdleTimer;
@@ -330,7 +330,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         Future.delayed(const Duration(milliseconds: 600), () {
           if (mounted && _geminiTurnComplete) {
             _setStateLabel(AgentState.idle);
-            _schedulePlayerIdleClose();
+            if (!(_preferNativeAndroidPcm && _nativeAndroidPcmAvailable)) {
+              _schedulePlayerIdleClose();
+            }
           }
         });
         return;
@@ -696,7 +698,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _flushPendingAudio();
     if (_isPlayerStreamOpen) {
       if (_preferNativeAndroidPcm && _nativeAndroidPcmAvailable) {
-        _nativeAudioChannel.invokeMethod<void>('stopPlayer');
+        _logDebug(
+            'player_event', 'native PCM player kept alive across idle turn');
+        return;
       } else {
         _soundPlayer.stopPlayer();
       }
@@ -711,7 +715,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _clearPendingAudio();
     if (_isPlayerStreamOpen) {
       if (_preferNativeAndroidPcm && _nativeAndroidPcmAvailable) {
-        _nativeAudioChannel.invokeMethod<void>('stopPlayer');
+        _nativeAudioChannel.invokeMethod<void>('flushPlayer');
+        _feedChain = null;
+        _logDebug('player_event', 'native PCM queue flushed');
+        return;
       } else {
         _soundPlayer.stopPlayer();
       }

@@ -20,6 +20,9 @@ class MainActivity : FlutterActivity() {
 	private val pcmQueue = LinkedBlockingDeque<ByteArray>(6)
 	private var audioTrack: AudioTrack? = null
 	@Volatile private var playbackLoopRunning = false
+	private var currentSampleRate: Int? = null
+	private var currentChannelCount: Int? = null
+	private var currentBufferBytes: Int? = null
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
@@ -57,6 +60,11 @@ class MainActivity : FlutterActivity() {
 						result.success(null)
 					}
 
+					"flushPlayer" -> {
+						flushPlayer()
+						result.success(null)
+					}
+
 					"releasePlayer" -> {
 						releasePlayer()
 						result.success(null)
@@ -68,8 +76,6 @@ class MainActivity : FlutterActivity() {
 	}
 
 	private fun initPlayer(sampleRate: Int, channelCount: Int, requestedBufferBytes: Int) {
-		releasePlayer()
-
 		val channelConfig = if (channelCount == 1) {
 			AudioFormat.CHANNEL_OUT_MONO
 		} else {
@@ -82,6 +88,26 @@ class MainActivity : FlutterActivity() {
 			AudioFormat.ENCODING_PCM_16BIT,
 		)
 		val bufferBytes = maxOf(minBufferBytes, requestedBufferBytes)
+
+		val reusableTrack = audioTrack != null &&
+			currentSampleRate == sampleRate &&
+			currentChannelCount == channelCount &&
+			currentBufferBytes == bufferBytes
+
+		if (reusableTrack) {
+			Log.d(
+				logTag,
+				"Reusing existing AudioTrack sampleRate=$sampleRate channelCount=$channelCount bufferBytes=$bufferBytes",
+			)
+			if (audioTrack?.playState != AudioTrack.PLAYSTATE_PLAYING) {
+				audioTrack?.play()
+				Log.d(logTag, "AudioTrack resumed")
+			}
+			ensurePlaybackLoop()
+			return
+		}
+
+		releasePlayer()
 
 		val trackBuilder = AudioTrack.Builder()
 			.setAudioAttributes(
@@ -105,15 +131,36 @@ class MainActivity : FlutterActivity() {
 		}
 
 		audioTrack = trackBuilder.build()
+		currentSampleRate = sampleRate
+		currentChannelCount = channelCount
+		currentBufferBytes = bufferBytes
 
+		Log.d(
+			logTag,
+			"AudioTrack created sampleRate=$sampleRate channelCount=$channelCount minBufferBytes=$minBufferBytes bufferBytes=$bufferBytes",
+		)
 		audioTrack?.play()
+		Log.d(logTag, "AudioTrack started")
 		pcmQueue.clear()
+		ensurePlaybackLoop()
+	}
+
+	private fun ensurePlaybackLoop() {
+		if (playbackLoopRunning) {
+			return
+		}
 		playbackLoopRunning = true
+		Log.d(logTag, "Starting native playback loop")
 		audioExecutor.execute {
 			while (playbackLoopRunning && !Thread.currentThread().isInterrupted) {
 				try {
 					val chunk = pcmQueue.pollFirst(250, TimeUnit.MILLISECONDS) ?: continue
-					audioTrack?.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+					val track = audioTrack ?: continue
+					val written = track.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+					Log.d(
+						logTag,
+						"AudioTrack write requested=${chunk.size} written=$written queueDepth=${pcmQueue.size} playState=${track.playState}",
+					)
 				} catch (_: InterruptedException) {
 					Thread.currentThread().interrupt()
 					break
@@ -121,21 +168,30 @@ class MainActivity : FlutterActivity() {
 					Log.e(logTag, "Native PCM playback loop error", e)
 				}
 			}
+			Log.d(logTag, "Native playback loop stopped")
 		}
 	}
 
 	private fun stopPlayer() {
-		playbackLoopRunning = false
+		Log.d(logTag, "stopPlayer() called; delegating to flushPlayer() to keep session-scoped track alive")
+		flushPlayer()
+	}
+
+	private fun flushPlayer() {
+		Log.d(logTag, "flushPlayer() called; clearing queueDepth=${pcmQueue.size}")
 		pcmQueue.clear()
 		try {
 			audioTrack?.pause()
 			audioTrack?.flush()
-			audioTrack?.stop()
-		} catch (_: Exception) {
+			audioTrack?.play()
+			Log.d(logTag, "AudioTrack flushed and resumed")
+		} catch (e: Exception) {
+			Log.e(logTag, "flushPlayer() failed", e)
 		}
 	}
 
 	private fun releasePlayer() {
+		Log.d(logTag, "releasePlayer() called; queueDepth=${pcmQueue.size}")
 		playbackLoopRunning = false
 		pcmQueue.clear()
 		try {
@@ -149,6 +205,9 @@ class MainActivity : FlutterActivity() {
 		} catch (_: Exception) {
 		}
 		audioTrack = null
+		currentSampleRate = null
+		currentChannelCount = null
+		currentBufferBytes = null
 	}
 
 	override fun onDestroy() {
