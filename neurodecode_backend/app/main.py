@@ -777,14 +777,19 @@ async def ws_live(websocket: WebSocket) -> None:
             # them into ~80 ms blocks greatly reduces JSON + base64 overhead on
             # the mobile client and prevents UI-thread contention.
             _audio_pending = bytearray()
-            _AUDIO_BATCH_MIN = 3840  # ~80ms @24kHz 16-bit mono
+            _AUDIO_BATCH_MIN = 5760 
+            _audio_batch_count = 0
 
             async def _flush_audio_pending() -> None:
-                nonlocal _audio_pending
+                nonlocal _audio_pending, _audio_batch_count
                 if not _audio_pending:
                     return
                 chunk = bytes(_audio_pending)
                 _audio_pending = bytearray()
+                _audio_batch_count += 1
+                print(
+                    f"[gemini→client] model_audio_batch #{_audio_batch_count} bytes={len(chunk)} pending=0"
+                )
                 await websocket.send_text(
                     json.dumps(
                         {
@@ -805,6 +810,10 @@ async def ws_live(websocket: WebSocket) -> None:
                         model_turn_active = True
                         last_activity = time.monotonic()
                         _audio_pending.extend(out.data)
+                        if len(_audio_pending) == len(out.data):
+                            print(
+                                f"[gemini→client] audio_batch_fill start bytes={len(_audio_pending)}"
+                            )
                         if len(_audio_pending) >= _AUDIO_BATCH_MIN:
                             await _flush_audio_pending()
                     elif out.type in {"model_text", "transcript_in", "transcript_out"}:
