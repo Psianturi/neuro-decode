@@ -2,18 +2,24 @@ package com.neurodecode.neurodecode_mobile
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
 	private val channelName = "neurodecode/live_audio"
+	private val logTag = "NeuroDecodeAudio"
 	private val audioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+	private val pcmQueue = LinkedBlockingDeque<ByteArray>(6)
 	private var audioTrack: AudioTrack? = null
+	@Volatile private var playbackLoopRunning = false
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
@@ -39,11 +45,9 @@ class MainActivity : FlutterActivity() {
 							result.success(null)
 							return@setMethodCallHandler
 						}
-						audioExecutor.execute {
-							try {
-								audioTrack?.write(bytes, 0, bytes.size, AudioTrack.WRITE_BLOCKING)
-							} catch (_: Exception) {
-							}
+						while (!pcmQueue.offerLast(bytes)) {
+							val dropped = pcmQueue.pollFirst()
+							Log.w(logTag, "Dropping stale PCM chunk bytes=${dropped?.size ?: 0}")
 						}
 						result.success(null)
 					}
@@ -77,9 +81,9 @@ class MainActivity : FlutterActivity() {
 			channelConfig,
 			AudioFormat.ENCODING_PCM_16BIT,
 		)
-		val bufferBytes = maxOf(minBufferBytes * 2, requestedBufferBytes)
+		val bufferBytes = maxOf(minBufferBytes, requestedBufferBytes)
 
-		audioTrack = AudioTrack.Builder()
+		val trackBuilder = AudioTrack.Builder()
 			.setAudioAttributes(
 				AudioAttributes.Builder()
 					.setUsage(AudioAttributes.USAGE_MEDIA)
@@ -95,12 +99,34 @@ class MainActivity : FlutterActivity() {
 			)
 			.setTransferMode(AudioTrack.MODE_STREAM)
 			.setBufferSizeInBytes(bufferBytes)
-			.build()
+
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+			trackBuilder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+		}
+
+		audioTrack = trackBuilder.build()
 
 		audioTrack?.play()
+		pcmQueue.clear()
+		playbackLoopRunning = true
+		audioExecutor.execute {
+			while (playbackLoopRunning && !Thread.currentThread().isInterrupted) {
+				try {
+					val chunk = pcmQueue.pollFirst(250, TimeUnit.MILLISECONDS) ?: continue
+					audioTrack?.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+				} catch (_: InterruptedException) {
+					Thread.currentThread().interrupt()
+					break
+				} catch (e: Exception) {
+					Log.e(logTag, "Native PCM playback loop error", e)
+				}
+			}
+		}
 	}
 
 	private fun stopPlayer() {
+		playbackLoopRunning = false
+		pcmQueue.clear()
 		try {
 			audioTrack?.pause()
 			audioTrack?.flush()
@@ -110,6 +136,8 @@ class MainActivity : FlutterActivity() {
 	}
 
 	private fun releasePlayer() {
+		playbackLoopRunning = false
+		pcmQueue.clear()
 		try {
 			audioTrack?.pause()
 			audioTrack?.flush()

@@ -67,7 +67,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
-  static const int _playerBufferSize = 12288;
+  static const int _playerBufferSize = 8195;
   final BytesBuilder _pendingPcmBuffer = BytesBuilder(copy: false);
   Timer? _audioFlushTimer;
   Timer? _playerIdleTimer;
