@@ -38,10 +38,10 @@ class LiveAgentScreen extends StatefulWidget {
 class _LiveAgentScreenState extends State<LiveAgentScreen> {
   static const int _geminiOutputSampleRate = 24000;
   static const int _geminiOutputChannels = 1;
-  static const int _audioFlushThresholdBytes = 7680;
-  static const int _audioPrebufferBytes = 12000; // 0.5 seconds @24kHz mono (24000 sample * 2 byte)
-  static const int _audioDropFrameBytes = 48000; // 2 seconds @24kHz mono
-  static const Duration _audioFlushInterval = Duration(milliseconds: 45);
+  static const int _audioFlushThresholdBytes = 3840; // ~80 ms @24kHz mono PCM16
+  static const int _audioPrebufferBytes = 7680; // ~160 ms @24kHz mono PCM16
+  static const int _audioDropFrameBytes = 48000; // ~1 second @24kHz mono PCM16
+  static const Duration _audioFlushInterval = Duration(milliseconds: 35);
   static const int _minTurnAudioBytes = 8000;
   static const Duration _minTurnDuration = Duration(milliseconds: 350);
   static const Duration _playerIdleCloseDelay = Duration(seconds: 8);
@@ -553,31 +553,35 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   void _queueAudioChunk(Uint8List pcm) {
     if (pcm.isEmpty) return;
 
-
     // PATCH: Drop frame policy if buffer is too long (>2 seconds of audio)
     if (_pendingPcmBuffer.length > _audioDropFrameBytes) {
-      _logDebug('audio_patch', 'Drop frame: buffer >2 seconds, clearing ${_pendingPcmBuffer.length} bytes');
+      _logDebug('audio_patch',
+          'Drop frame: buffer >2 seconds, clearing ${_pendingPcmBuffer.length} bytes');
       _clearPendingAudio();
     }
 
     _pendingPcmBuffer.add(pcm);
 
     // PATCH: Pre-buffer at least 0.5 seconds before playback
-    if (!_isPlayerStreamOpen && _pendingPcmBuffer.length < _audioPrebufferBytes) {
-      _logDebug('audio_patch', 'Pre-buffering: ${_pendingPcmBuffer.length} bytes');
+    if (!_isPlayerStreamOpen &&
+        _pendingPcmBuffer.length < _audioPrebufferBytes) {
+      _logDebug(
+          'audio_patch', 'Pre-buffering: ${_pendingPcmBuffer.length} bytes');
       // Wait until buffer is sufficient before starting playback
       return;
     }
 
     if (_pendingPcmBuffer.length >= _audioFlushThresholdBytes) {
-      _logDebug('audio_patch', 'Flush: buffer >= threshold (${_pendingPcmBuffer.length} bytes)');
+      _logDebug('audio_patch',
+          'Flush: buffer >= threshold (${_pendingPcmBuffer.length} bytes)');
       _flushPendingAudio();
       return;
     }
 
     _audioFlushTimer ??= Timer(_audioFlushInterval, () {
       _audioFlushTimer = null;
-      _logDebug('audio_patch', 'Flush: interval (${_pendingPcmBuffer.length} bytes)');
+      _logDebug(
+          'audio_patch', 'Flush: interval (${_pendingPcmBuffer.length} bytes)');
       _flushPendingAudio();
     });
   }
@@ -655,6 +659,14 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   void _logDebug(String tag, String msg) {
     final ts = DateFormat('HH:mm:ss').format(DateTime.now());
+    // Skip setState for high-frequency audio tags to avoid UI thread contention
+    if (tag == 'audio_patch') {
+      _debugLog.add('[$ts] $tag: $msg');
+      if (_debugLog.length > 200) {
+        _debugLog.removeRange(0, _debugLog.length - 200);
+      }
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _debugLog.add('[$ts] $tag: $msg');

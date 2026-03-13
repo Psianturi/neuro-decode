@@ -22,7 +22,32 @@ class NeuroDecodeAI:
         self._vgg16_eyes: Any | None = None
         self._models_loaded = False
         self._model_load_attempted = False
+        self._warmup_started = False
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _resolve_vgg16_weights_path(base_dir: str) -> str | None:
+        candidates = [
+            os.getenv("NEURODECODE_VGG16_WEIGHTS_PATH", "").strip(),
+            os.path.join(
+                base_dir,
+                "models",
+                "vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5",
+            ),
+        ]
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return None
+
+    def start_background_warmup(self) -> None:
+        if self._warmup_started:
+            return
+        with self._lock:
+            if self._warmup_started:
+                return
+            self._warmup_started = True
+        threading.Thread(target=self._lazy_load_models, daemon=True).start()
 
     @staticmethod
     def _load_keras_model(model_path: str) -> Any:
@@ -69,8 +94,18 @@ class NeuroDecodeAI:
                 if os.path.exists(video_path):
                     self._video_extractor = self._load_keras_model(video_path)
                     # VGG16 produces dense visual features that match the Colab pipeline.
-                    self._vgg16_eyes = VGG16(weights="imagenet", include_top=False, pooling="avg")
-                    print("[AI Engine] Loaded video extractor + VGG16")
+                    local_vgg16_weights = self._resolve_vgg16_weights_path(base_dir)
+                    if local_vgg16_weights:
+                        self._vgg16_eyes = VGG16(
+                            weights=local_vgg16_weights,
+                            include_top=False,
+                            pooling="avg",
+                        )
+                        print("[AI Engine] Loaded video extractor + local VGG16 weights")
+                    else:
+                        print(
+                            "[AI Engine] Local VGG16 weights not found; vision observer disabled for this process"
+                        )
 
                 self._models_loaded = True
                 print("[AI Engine] Lazy load complete")

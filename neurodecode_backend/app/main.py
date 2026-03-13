@@ -34,6 +34,11 @@ MIN_AUDIO_BYTES_FOR_ANALYSIS = 32000  # ~1s of 16kHz mono PCM16
 LATEST_SESSION_MAX_ITEMS = 10
 
 
+@app.on_event("startup")
+async def warm_observer_models() -> None:
+    ai_engine.start_background_warmup()
+
+
 SYSTEM_INSTRUCTION = (
     "You are NeuroDecode AI, an empathetic real-time decision-support assistant for "
     "caregivers supporting autistic children. You do NOT diagnose or provide medical "
@@ -767,6 +772,29 @@ async def ws_live(websocket: WebSocket) -> None:
         async def pump_gemini_to_client() -> None:
             nonlocal last_activity, awaiting_model_response, model_turn_active
             print("[gemini\u2192client] pump started, waiting for Gemini responses...")
+            # Aggregate small audio chunks to reduce WebSocket message frequency.
+            # Gemini often sends many tiny PCM fragments per second; batching
+            # them into ~80 ms blocks greatly reduces JSON + base64 overhead on
+            # the mobile client and prevents UI-thread contention.
+            _audio_pending = bytearray()
+            _AUDIO_BATCH_MIN = 3840  # ~80ms @24kHz 16-bit mono
+
+            async def _flush_audio_pending() -> None:
+                nonlocal _audio_pending
+                if not _audio_pending:
+                    return
+                chunk = bytes(_audio_pending)
+                _audio_pending = bytearray()
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "model_audio",
+                            "data_b64": b64_encode(chunk),
+                            "mime_type": "audio/pcm;rate=24000",
+                        }
+                    )
+                )
+
             # The underlying Live SDK receive stream may complete after a turn.
             # Keep the WebSocket session alive by re-entering the receive loop.
             while True:
@@ -776,15 +804,9 @@ async def ws_live(websocket: WebSocket) -> None:
                         awaiting_model_response = False
                         model_turn_active = True
                         last_activity = time.monotonic()
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "model_audio",
-                                    "data_b64": b64_encode(out.data),
-                                    "mime_type": out.mime_type or "audio/pcm;rate=24000",
-                                }
-                            )
-                        )
+                        _audio_pending.extend(out.data)
+                        if len(_audio_pending) >= _AUDIO_BATCH_MIN:
+                            await _flush_audio_pending()
                     elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                         if out.text:
                             if out.type in {"model_text", "transcript_out"} and _looks_like_internal_note(out.text):
@@ -808,12 +830,14 @@ async def ws_live(websocket: WebSocket) -> None:
                                 json.dumps({"type": out.type, "text": outgoing_text})
                             )
                     elif out.type == "model_audio_end":
+                        await _flush_audio_pending()
                         awaiting_model_response = False
                         model_turn_active = False
                         last_activity = time.monotonic()
                         print("[gemini\u2192client] model_audio_end \u2014 turn complete")
                         await websocket.send_text(json.dumps({"type": "model_audio_end"}))
                     elif out.type == "interrupted":
+                        _audio_pending = bytearray()  # discard on interruption
                         awaiting_model_response = False
                         model_turn_active = False
                         last_activity = time.monotonic()
