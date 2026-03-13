@@ -16,8 +16,10 @@ import java.util.concurrent.TimeUnit
 class MainActivity : FlutterActivity() {
 	private val channelName = "neurodecode/live_audio"
 	private val logTag = "NeuroDecodeAudio"
+	private val maxQueueChunks = 48
+	private val queueOfferTimeoutMs = 120L
 	private val audioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-	private val pcmQueue = LinkedBlockingDeque<ByteArray>(6)
+	private val pcmQueue = LinkedBlockingDeque<ByteArray>(maxQueueChunks)
 	private var audioTrack: AudioTrack? = null
 	@Volatile private var playbackLoopRunning = false
 	private var currentSampleRate: Int? = null
@@ -48,11 +50,11 @@ class MainActivity : FlutterActivity() {
 							result.success(null)
 							return@setMethodCallHandler
 						}
-						while (!pcmQueue.offerLast(bytes, 15, TimeUnit.MILLISECONDS)) {
+						while (!pcmQueue.offerLast(bytes, queueOfferTimeoutMs, TimeUnit.MILLISECONDS)) {
 							val dropped = pcmQueue.pollFirst()
 							Log.w(logTag, "Dropping stale PCM chunk bytes=${dropped?.size ?: 0}")
 						}
-						Log.d(logTag, "Queued PCM chunk bytes=${bytes.size} queueDepth=${pcmQueue.size}")
+						Log.d(logTag, "Queued PCM chunk bytes=${bytes.size} queueDepth=${pcmQueue.size}/$maxQueueChunks")
 						result.success(null)
 					}
 
