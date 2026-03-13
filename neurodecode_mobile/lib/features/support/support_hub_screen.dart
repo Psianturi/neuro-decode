@@ -6,6 +6,7 @@ import '../../theme/app_theme.dart';
 import '../home/history_insights_screen.dart';
 import '../home/session_summary_service.dart';
 import '../live_agent/live_agent_screen.dart';
+import '../profile/profile_memory_screen.dart';
 
 class SupportHubScreen extends StatefulWidget {
   const SupportHubScreen({
@@ -152,6 +153,33 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                 elevation: 6,
                 shadowColor: NeuroColors.primary.withValues(alpha: 0.28),
               ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                final profileId = _profileIdController.text.trim();
+                if (profileId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'Enter a Profile ID before opening profile memory.'),
+                    ),
+                  );
+                  return;
+                }
+                _identityStore.setActiveProfileId(profileId);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ProfileMemoryScreen(profileId: profileId),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.psychology_alt_outlined),
+              label: const Text('OPEN PROFILE MEMORY'),
             ),
           ),
           const SizedBox(height: 12),

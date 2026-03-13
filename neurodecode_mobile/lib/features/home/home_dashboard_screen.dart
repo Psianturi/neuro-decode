@@ -2,7 +2,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../config/app_identity_store.dart';
 import 'history_insights_screen.dart';
+import '../profile/profile_memory_screen.dart';
 import 'session_summary_service.dart';
 import '../../theme/app_theme.dart';
 
@@ -22,13 +24,26 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final SessionSummaryService _summaryService = SessionSummaryService();
+  final AppIdentityStore _identityStore = AppIdentityStore();
   SessionSummary? _latestSummary;
   bool _isLoadingSummary = false;
+  String? _activeProfileId;
 
   @override
   void initState() {
     super.initState();
     _refreshLatestSummary();
+    _loadActiveProfileId();
+  }
+
+  Future<void> _loadActiveProfileId() async {
+    final profileId = await _identityStore.getActiveProfileId();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _activeProfileId = profileId;
+    });
   }
 
   Future<void> _refreshLatestSummary() async {
@@ -74,83 +89,109 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-            Row(
-              children: [
-                const _ConnectionDot(),
-                const SizedBox(width: 10),
-                Text(
-                  'Cloud Run Connected',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: NeuroColors.surface,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
                 children: [
-                  Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: Image.asset(
-                        'assets/mascot01.png',
-                        width: 118,
-                        height: 118,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
+                  const _ConnectionDot(),
+                  const SizedBox(width: 10),
                   Text(
-                    'Hello. Wishing you a calm day.',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Review the latest session, check insights, and open Live Support when you need real-time guidance.',
-                    style: TextStyle(color: NeuroColors.textSecondary),
+                    'Cloud Run Connected',
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 24),
-            _LatestSessionCard(
-              summary: _latestSummary,
-              isLoading: _isLoadingSummary,
-              onRefresh: _refreshLatestSummary,
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 46,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => HistoryInsightsScreen(service: _summaryService),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: NeuroColors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: Image.asset(
+                          'assets/mascot01.png',
+                          width: 118,
+                          height: 118,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
-                  );
-                  await _refreshLatestSummary();
-                },
-                icon: const Icon(Icons.history),
-                label: const Text('VIEW HISTORY / INSIGHTS'),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Hello. Wishing you a calm day.',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Review the latest session, check insights, and open Live Support when you need real-time guidance.',
+                      style: TextStyle(color: NeuroColors.textSecondary),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 46,
-              child: OutlinedButton.icon(
-                onPressed: widget.onGoSupport,
-                icon: const Icon(Icons.support_agent),
-                label: const Text('GO TO LIVE SUPPORT'),
+              const SizedBox(height: 24),
+              _LatestSessionCard(
+                summary: _latestSummary,
+                isLoading: _isLoadingSummary,
+                onRefresh: _refreshLatestSummary,
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            HistoryInsightsScreen(service: _summaryService),
+                      ),
+                    );
+                    await _refreshLatestSummary();
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('VIEW HISTORY / INSIGHTS'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed:
+                      _activeProfileId == null || _activeProfileId!.isEmpty
+                          ? null
+                          : () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ProfileMemoryScreen(
+                                    profileId: _activeProfileId!,
+                                  ),
+                                ),
+                              );
+                            },
+                  icon: const Icon(Icons.psychology_alt_outlined),
+                  label: Text(
+                    _activeProfileId == null || _activeProfileId!.isEmpty
+                        ? 'SET PROFILE IN SUPPORT TO OPEN MEMORY'
+                        : 'OPEN PROFILE MEMORY',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: widget.onGoSupport,
+                  icon: const Icon(Icons.support_agent),
+                  label: const Text('GO TO LIVE SUPPORT'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
