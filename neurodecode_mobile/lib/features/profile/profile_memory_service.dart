@@ -135,6 +135,63 @@ class ProfileMemoryContext {
   final int recentSessionCount;
   final String context;
 
+  String get displayContext {
+    if (context.isEmpty) {
+      return '';
+    }
+
+    return context
+        .replaceFirst(
+          RegExp(
+              r'^PRIVATE MEMORY CONTEXT \(DO NOT QUOTE VERBATIM TO USER\):\s*'),
+          '',
+        )
+        .replaceAll('|', ' | ')
+        .trim();
+  }
+
+  List<ProfileContextSection> get sections {
+    final cleaned = displayContext;
+    if (cleaned.isEmpty) {
+      return const <ProfileContextSection>[];
+    }
+
+    final lines = cleaned
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+
+    final output = <ProfileContextSection>[];
+    String? currentTitle;
+    final currentItems = <String>[];
+
+    void flush() {
+      if (currentTitle == null || currentItems.isEmpty) {
+        return;
+      }
+      output.add(
+        ProfileContextSection(
+          title: currentTitle,
+          items: List<String>.from(currentItems),
+        ),
+      );
+      currentItems.clear();
+    }
+
+    for (final line in lines) {
+      final isSectionHeader = line.endsWith(':') && !line.startsWith('- ');
+      if (isSectionHeader) {
+        flush();
+        currentTitle = line.substring(0, line.length - 1);
+        continue;
+      }
+      currentItems.add(line.startsWith('- ') ? line.substring(2) : line);
+    }
+    flush();
+    return output;
+  }
+
   factory ProfileMemoryContext.fromJson(Map<String, dynamic> json) {
     int parseInt(dynamic value) {
       if (value is int) {
@@ -156,6 +213,16 @@ class ProfileMemoryContext {
       context: (json['context'] ?? '').toString().trim(),
     );
   }
+}
+
+class ProfileContextSection {
+  const ProfileContextSection({
+    required this.title,
+    required this.items,
+  });
+
+  final String title;
+  final List<String> items;
 }
 
 class ProfileMemoryService {

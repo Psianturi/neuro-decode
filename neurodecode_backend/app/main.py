@@ -449,6 +449,11 @@ async def ws_live(websocket: WebSocket) -> None:
                 session_limit=settings.profile_memory_session_limit,
             )
             if memory_context:
+                memory_lines = [line.strip() for line in memory_context.splitlines() if line.strip()]
+                preview = " | ".join(memory_lines[1:3]) if len(memory_lines) > 1 else memory_lines[0]
+                print(
+                    f"[profile_memory] Loaded for profile_id={profile_id} lines={len(memory_lines)} preview={preview[:240]}"
+                )
                 effective_system_instruction = (
                     f"{SYSTEM_INSTRUCTION}\n\n{memory_context}"
                 )

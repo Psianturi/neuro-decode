@@ -640,30 +640,16 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 10),
-                if ((_memoryContext?.context ?? '').isNotEmpty) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: NeuroColors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Current memory summary',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _memoryContext!.context,
-                          style:
-                              const TextStyle(color: NeuroColors.textSecondary),
-                        ),
-                      ],
-                    ),
+                if ((_memoryContext?.sections ??
+                        const <ProfileContextSection>[])
+                    .isNotEmpty) ...[
+                  const Text(
+                    'What Buddy currently remembers',
+                    style: TextStyle(color: NeuroColors.textSecondary),
                   ),
+                  const SizedBox(height: 10),
+                  for (final section in _memoryContext!.sections)
+                    _ContextSectionCard(section: section),
                   const SizedBox(height: 12),
                 ],
                 if (_error != null && _memoryItems.isEmpty)
@@ -906,5 +892,49 @@ class _MemoryTile extends StatelessWidget {
     } catch (_) {
       return raw;
     }
+  }
+}
+
+class _ContextSectionCard extends StatelessWidget {
+  const _ContextSectionCard({required this.section});
+
+  final ProfileContextSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: NeuroColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            section.title,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          for (final item in section.items) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('• ', style: TextStyle(fontWeight: FontWeight.w700)),
+                Expanded(
+                  child: Text(
+                    item,
+                    style: const TextStyle(color: NeuroColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+          ],
+        ],
+      ),
+    );
   }
 }
