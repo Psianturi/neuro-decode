@@ -1,190 +1,195 @@
 # NeuroDecode AI
-NeuroDecode AI is a real-time, multimodal caregiving & parents copilot.
 
-It is designed to support caregivers of autistic children during high-stress moments, where typing into an app is not realistic. Instead of waiting for long prompts, NeuroDecode can observe live context from camera and audio, then respond with calm, practical guidance.
+NeuroDecode AI is a real-time multimodal caregiving copilot for high-stress sensory moments.
 
-## Why We Built This
-Caregiving during sensory overload or meltdown moments requires immediate support, not delayed Q&A.
+It is designed for caregivers who need immediate support without typing. The app can listen, optionally observe with camera context, and respond with calm, actionable guidance in the same session.
 
-NeuroDecode was built to reduce caregiver cognitive load by combining three abilities in one live loop:
-1. See behavior cues from camera frames.
-2. Hear distress signals from audio chunks.
-3. Speak actionable guidance through Gemini Live.
+## Product Snapshot (Current)
 
-## How It Works: See, Hear, Speak
-NeuroDecode uses a two-layer AI pipeline:
-1. Local sensor stream from Flutter app (camera and mic).
-2. Cloud intelligence in FastAPI backend with Gemini Live plus custom Keras models.
+Current implemented user flow:
 
-Core flow:
-1. Flutter sends audio and periodic camera frames through WebSocket.
-2. Backend runs best-effort Keras inference with lazy loading.
-3. Backend sends internal observer notes to Gemini Live as private context.
-4. Gemini responds naturally to caregiver with concise, supportive intervention steps.
+1. Choose `Audio only` or `Video + audio` in Support.
+2. Select or enter a `Profile ID`.
+3. Start live session and speak with push-to-talk.
+4. Receive Gemini guidance (audio + transcript).
+5. Review post-session summary in History / Insights.
+6. Save suggested memories (trigger/follow-up) to profile memory.
 
-Technical highlights:
-1. Visual observer uses VGG16 feature extraction plus custom behavior extractor model.
-2. Audio observer uses MFCC features plus custom Conv1D-based extractor model.
-3. Gemini system instruction explicitly prevents raw observer-note leakage.
-4. Idle timeout auto-disconnect (45s) reduces runaway session cost.
-5. Cloud Build deploys to Cloud Run with `4Gi` memory for TensorFlow workload.
+Major capabilities already running:
+
+1. Multi-turn live session over WebSocket (`/ws/live`).
+2. Native Android PCM playback path for stable 24kHz output.
+3. Profile Workspace with structured support preferences.
+4. Retrieval-based profile memory context for live session personalization.
+5. Firestore-backed session history with fallback memory store.
+6. Suggested memory actions from History / Insights.
+
+## Why It Matters
+
+During sensory escalation, caregivers usually cannot stop and type long prompts.
+
+NeuroDecode reduces caregiver cognitive load with a live loop:
+
+1. Hear context (mic stream).
+2. Optionally see context (camera observer mode).
+3. Respond instantly with practical support steps.
 
 ## Architecture (High-Level)
+
 ```mermaid
 flowchart LR
     A[Flutter Mobile App] -->|wss /ws/live| B[FastAPI Backend on Cloud Run]
     B --> C[Gemini Live API]
-    B --> D[Audio Keras Extractor]
-    B --> E[VGG16 + Visual Keras Extractor]
-    D --> F[Audio Observer Note]
-    E --> G[Visual Observer Note]
-    F --> C
-    G --> C
-    C -->|streaming audio/text| A
+    B --> D[Audio Observer Model]
+    B --> E[Visual Observer Model]
+    B --> F[Firestore: sessions, events, profiles, memory]
+    D --> C
+    E --> C
+    F --> B
+    C -->|audio/transcript| A
 ```
 
 ## Repository Structure
+
 ```text
 NeuroDecode/
+|- README.md
 |- cloudbuild.yaml
-|- asd_agent_training.ipynb
+
 |- neurodecode_backend/
-|  |- Dockerfile
+|  |- README.md
 |  |- requirements.txt
 |  |- app/
 |  |  |- main.py
+|  |  |- settings.py
 |  |  |- gemini_live.py
 |  |  |- ai_processor.py
 |  |  |- models/
-|  |  |  |- autism_behavior_extractor.keras
-|  |  |  |- autism_audio_extractor.keras
-|  |- scripts/
 |- neurodecode_mobile/
+   |- README.md
    |- lib/
-      |- config/app_config.dart
+      |- features/support/
+      |- features/live_agent/
+      |- features/home/
+      |- features/profile/
 ```
 
 ## Quick Start
-### 1. Backend (FastAPI + Gemini Live + Keras)
-Requirements:
-1. Python 3.10+ (3.11 recommended)
-2. Google Cloud project
-3. Gemini API key
-4. gcloud CLI authenticated
 
-Local run:
+### Backend (FastAPI)
+
+Requirements:
+
+1. Python 3.10+
+2. Gemini API key
+3. Optional Firestore credentials for local run
+
 ```powershell
 cd c:\PROJ\NeuroDecode\neurodecode_backend
 python -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\pip install -r requirements.txt
+
 $env:GEMINI_API_KEY = "YOUR_KEY_HERE"
 $env:NEURODECODE_SUMMARY_ENABLED = "1"
 $env:NEURODECODE_SUMMARY_MODEL = "gemini-2.5-flash-lite"
 $env:NEURODECODE_FIRESTORE_ENABLED = "1"
-$env:NEURODECODE_FIRESTORE_COLLECTION = "sessions"
-# Optional for local non-GCP execution
-# $env:GOOGLE_APPLICATION_CREDENTIALS = "C:\\path\\to\\service-account.json"
-$env:TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-$env:TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
+$env:NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT = "1"
+
 .\.venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Health check:
+
 ```powershell
 curl.exe -s http://127.0.0.1:8000/health
 ```
 
-Expected response:
-```json
-{"status":"ok"}
-```
+### Mobile (Flutter)
 
-### 2. Mobile App (Flutter)
 ```powershell
 cd c:\PROJ\NeuroDecode\neurodecode_mobile
 flutter pub get
 flutter run
 ```
 
-Set backend URL in:
-- `neurodecode_mobile/lib/config/app_config.dart`
+Set backend host in:
 
-Current pattern:
-```dart
-static const String backendUrl = 'YOUR_CLOUD_RUN_HOST';
-static const String wsEndpoint = 'wss://$backendUrl/ws/live';
-```
+1. `neurodecode_mobile/lib/config/app_config.dart`
 
-## Cloud Deployment (Automated)
-Cloud Build trigger uses root `cloudbuild.yaml` and deploys to Cloud Run service `neurodecode-backend` in `asia-southeast1`.
+## Core API / Protocol
 
-Manual deploy alternative:
-```powershell
-cd c:\PROJ\NeuroDecode\neurodecode_backend
-gcloud run deploy neurodecode-backend --source . --region asia-southeast1 --allow-unauthenticated --timeout 3600 --concurrency 1 --memory 4Gi
-```
+Key HTTP endpoints:
 
-Firestore env for Cloud Run deployment:
-```powershell
-gcloud run services update neurodecode-backend --region asia-southeast1 --update-env-vars NEURODECODE_FIRESTORE_ENABLED=1,NEURODECODE_FIRESTORE_COLLECTION=sessions
-```
+1. `GET /sessions`
+2. `GET /sessions/latest`
+3. `GET /profiles/{profile_id}`
+4. `PUT /profiles/{profile_id}`
+5. `GET /profiles/{profile_id}/memory`
+6. `POST /profiles/{profile_id}/memory`
+7. `GET /profiles/{profile_id}/memory-context`
 
-## Runtime Notes
-1. Backend is real-only mode. `GEMINI_API_KEY` is required.
-2. Observer notes are private context for Gemini, not user-facing text.
-3. TensorFlow models are lazy-loaded at first inference call to reduce cold start impact.
-4. First vision/audio inference may have higher latency due to model initialization.
-5. Post-crisis summary runs on session close with `NEURODECODE_SUMMARY_MODEL` (default `gemini-2.5-flash-lite`).
-6. Telegram notification is sent only when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
-7. Telegram format uses `MarkdownV2` with character escaping to avoid API error 400.
-8. Session history is persisted to Firestore (collection `sessions`) with memory fallback when Firestore is unavailable.
+WebSocket:
+
+1. `GET /ws/live` (query: `user_id`, optional `profile_id`)
+
+Important server event:
+
+1. `profile_memory_status` indicates profile memory context is active for the session.
+
+## Environment Variables (Important)
+
+Core:
+
+1. `GEMINI_API_KEY`
+2. `NEURODECODE_LIVE_MODEL`
+3. `NEURODECODE_RESPONSE_MODALITY`
+
+Memory / profile:
+
+1. `NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT`
+2. `NEURODECODE_PROFILE_MEMORY_ITEM_LIMIT`
+3. `NEURODECODE_PROFILE_MEMORY_SESSION_LIMIT`
+
+Summary / notifications:
+
+1. `NEURODECODE_SUMMARY_ENABLED`
+2. `NEURODECODE_SUMMARY_MODEL`
+3. `TELEGRAM_BOT_TOKEN`
+4. `TELEGRAM_CHAT_ID`
+
+Firestore:
+
+1. `NEURODECODE_FIRESTORE_ENABLED`
+2. `NEURODECODE_FIRESTORE_COLLECTION`
+3. `NEURODECODE_FIRESTORE_EVENT_COLLECTION`
+4. `NEURODECODE_FIRESTORE_PROFILE_COLLECTION`
+5. `NEURODECODE_FIRESTORE_PROFILE_MEMORY_COLLECTION`
+6. `NEURODECODE_FIRESTORE_PROJECT`
+
+## Known Current Gaps
+
+These are tracked and expected in current phase:
+
+1. Mid-response audio can still feel slightly slow on some devices.
+2. Camera preview may fail to initialize on certain OEM/driver combinations (retry fallback exists).
+3. Notification system is still rule-foundation stage, not yet fully autonomous.
 
 ## Planning Docs
-For safe incremental development after the live-session baseline:
 
 1. [docs/next_steps_roadmap.md](docs/next_steps_roadmap.md)
 2. [docs/firestore_schema_plan.md](docs/firestore_schema_plan.md)
 
-## Session Summary API
-Use this endpoint to render History/Insight in Flutter after a session ends.
+## Next Priority (Demo-Oriented)
 
-```http
-GET /sessions/latest
-```
+1. Proof of memory influence in live response (`Profile ID` context clearly reflected in Gemini guidance).
+2. Suggested memory UX refinement and dedupe behavior.
+3. Rule-based proactive follow-up items as notification foundation.
 
-Example response:
-```json
-{
-    "status": "ok",
-    "session": {
-        "timestamp_utc": "2026-03-07T12:34:56.000000+00:00",
-        "duration_seconds": 240,
-        "duration_minutes": 4,
-        "close_reason": "idle_timeout",
-        "summary_text": "TITLE: ...",
-        "structured": {
-            "title": "...",
-            "triggers_visual": "...",
-            "triggers_audio": "...",
-            "agent_actions": "...",
-            "follow_up": "...",
-            "safety_note": "..."
-        }
-    }
-}
-```
+## Data / Model References
 
-## Data and Model Sources
-Model and training references:
 1. Video NN reference: https://github.com/AutismBrainBehavior/Video-Neural-Network-ASD-screening
 2. Audio NN reference: https://github.com/AutismBrainBehavior/Audio-Neural-Network-ASD-screening
-
-Audio dataset references:
-1. UrbanSound8K: https://urbansounddataset.weebly.com/urbansound8k.html
-2. Additional proprietary source: Anak Unggul caregiver recordings (used for ASD-oriented distress signal context)
-
-Notebook in this repo:
-- `asd_agent_training.ipynb`
+3. Training notebook: `asd_agent_training.ipynb`
 
 
