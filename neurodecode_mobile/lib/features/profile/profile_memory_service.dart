@@ -11,6 +11,10 @@ class ProfileRecord {
     required this.childName,
     required this.caregiverName,
     required this.notes,
+    required this.generatedSummary,
+    required this.triggerTags,
+    required this.calmingTags,
+    required this.communicationTags,
     required this.raw,
   });
 
@@ -19,6 +23,10 @@ class ProfileRecord {
   final String childName;
   final String caregiverName;
   final String notes;
+  final String generatedSummary;
+  final List<String> triggerTags;
+  final List<String> calmingTags;
+  final List<String> communicationTags;
   final Map<String, dynamic> raw;
 
   factory ProfileRecord.fromJson(String profileId, Map<String, dynamic> json) {
@@ -36,12 +44,33 @@ class ProfileRecord {
       return '';
     }
 
+    List<String> pickList(List<String> keys) {
+      for (final key in keys) {
+        final rawValue = json[key];
+        if (rawValue is List) {
+          final values = rawValue
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toList();
+          if (values.isNotEmpty) {
+            return values;
+          }
+        }
+      }
+      return const <String>[];
+    }
+
     return ProfileRecord(
       profileId: profileId,
       name: pick(const ['name', 'profile_name', 'display_name']),
       childName: pick(const ['child_name', 'childName']),
       caregiverName: pick(const ['caregiver_name', 'caregiverName']),
       notes: pick(const ['notes', 'support_notes', 'summary']),
+      generatedSummary: pick(const ['generated_summary', 'profile_summary']),
+      triggerTags: pickList(const ['trigger_tags', 'triggers']),
+      calmingTags: pickList(const ['calming_tags', 'calming_supports']),
+      communicationTags:
+          pickList(const ['communication_tags', 'communication_preferences']),
       raw: Map<String, dynamic>.from(json),
     );
   }
@@ -201,12 +230,20 @@ class ProfileMemoryService {
     required String childName,
     required String caregiverName,
     required String notes,
+    required String generatedSummary,
+    required List<String> triggerTags,
+    required List<String> calmingTags,
+    required List<String> communicationTags,
   }) async {
     final payload = <String, dynamic>{
       'name': name.trim(),
       'child_name': childName.trim(),
       'caregiver_name': caregiverName.trim(),
       'notes': notes.trim(),
+      'generated_summary': generatedSummary.trim(),
+      'trigger_tags': triggerTags,
+      'calming_tags': calmingTags,
+      'communication_tags': communicationTags,
     };
     final decoded = await _sendJson(
       method: 'PUT',

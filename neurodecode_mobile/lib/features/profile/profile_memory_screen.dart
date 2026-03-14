@@ -19,6 +19,37 @@ class ProfileMemoryScreen extends StatefulWidget {
 }
 
 class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
+  static const List<String> _triggerOptions = [
+    'Loud noise',
+    'Crowded place',
+    'Sudden change',
+    'Waiting too long',
+    'Denied request',
+    'Fatigue',
+  ];
+  static const List<String> _calmingOptions = [
+    'Soft voice',
+    'Short phrases',
+    'Breathing prompt',
+    'Quiet space',
+    'Favorite object',
+    'Water break',
+  ];
+  static const List<String> _communicationOptions = [
+    'One step at a time',
+    'Pause before repeating',
+    'Avoid touching first',
+    'Give reassurance first',
+    'Use simple choices',
+    'Keep tone gentle',
+  ];
+  static const List<String> _memoryCategories = [
+    'trigger',
+    'calming',
+    'routine',
+    'safety',
+    'preference',
+  ];
   static const List<_QuickMemoryTemplate> _quickTemplates = [
     _QuickMemoryTemplate(
       category: 'trigger',
@@ -57,8 +88,12 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
   bool _isAddingMemory = false;
   String? _error;
   String _selectedConfidence = 'medium';
+  String _selectedMemoryCategory = 'trigger';
   List<ProfileMemoryItem> _memoryItems = const <ProfileMemoryItem>[];
   ProfileMemoryContext? _memoryContext;
+  Set<String> _selectedTriggers = <String>{};
+  Set<String> _selectedCalmingSupports = <String>{};
+  Set<String> _selectedCommunicationPrefs = <String>{};
 
   @override
   void initState() {
@@ -105,6 +140,9 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
       setState(() {
         _memoryItems = items;
         _memoryContext = context;
+        _selectedTriggers = {...?profile?.triggerTags};
+        _selectedCalmingSupports = {...?profile?.calmingTags};
+        _selectedCommunicationPrefs = {...?profile?.communicationTags};
       });
     } catch (e) {
       if (!mounted) {
@@ -136,6 +174,10 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
         childName: _childNameController.text,
         caregiverName: _caregiverNameController.text,
         notes: _notesController.text,
+        generatedSummary: _generatedSummary,
+        triggerTags: _selectedTriggers.toList(),
+        calmingTags: _selectedCalmingSupports.toList(),
+        communicationTags: _selectedCommunicationPrefs.toList(),
       );
       if (!mounted) {
         return;
@@ -165,7 +207,6 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
 
   Future<void> _addMemory() async {
     final note = _memoryNoteController.text.trim();
-    final category = _memoryCategoryController.text.trim();
     if (note.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Memory note cannot be empty.')),
@@ -181,12 +222,11 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
     try {
       await widget.service.addMemory(
         profileId: widget.profileId,
-        category: category.isEmpty ? 'general' : category,
+        category: _selectedMemoryCategory,
         note: note,
         confidence: _selectedConfidence,
       );
       _memoryNoteController.clear();
-      _memoryCategoryController.text = 'general';
       await _load();
       if (!mounted) {
         return;
@@ -211,25 +251,75 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
   }
 
   void _applyTemplate(_QuickMemoryTemplate template) {
-    _memoryCategoryController.text = template.category;
+    _selectedMemoryCategory = template.category;
     _memoryNoteController.text = template.note;
+  }
+
+  void _toggleSelection(Set<String> bucket, String value) {
+    setState(() {
+      if (bucket.contains(value)) {
+        bucket.remove(value);
+      } else {
+        bucket.add(value);
+      }
+    });
   }
 
   int get _profileCompletionScore {
     var score = 0;
-    if (_nameController.text.trim().isNotEmpty) score++;
     if (_childNameController.text.trim().isNotEmpty) score++;
     if (_caregiverNameController.text.trim().isNotEmpty) score++;
-    if (_notesController.text.trim().isNotEmpty) score++;
+    if (_selectedTriggers.isNotEmpty || _selectedCalmingSupports.isNotEmpty) {
+      score++;
+    }
+    if (_selectedCommunicationPrefs.isNotEmpty ||
+        _notesController.text.trim().isNotEmpty) {
+      score++;
+    }
     return score;
+  }
+
+  String get _generatedSummary {
+    final child = _childNameController.text.trim();
+    final caregiver = _caregiverNameController.text.trim();
+    final extra = _notesController.text.trim();
+    final parts = <String>[];
+
+    if (child.isNotEmpty) {
+      parts.add('$child is the child currently being supported.');
+    }
+    if (caregiver.isNotEmpty) {
+      parts.add('Primary caregiver: $caregiver.');
+    }
+    if (_selectedTriggers.isNotEmpty) {
+      parts.add('Common triggers: ${_selectedTriggers.join(', ')}.');
+    }
+    if (_selectedCalmingSupports.isNotEmpty) {
+      parts.add(
+          'Helpful calming supports: ${_selectedCalmingSupports.join(', ')}.');
+    }
+    if (_selectedCommunicationPrefs.isNotEmpty) {
+      parts.add(
+          'Best communication style: ${_selectedCommunicationPrefs.join(', ')}.');
+    }
+    if (extra.isNotEmpty) {
+      parts.add(extra);
+    }
+
+    if (parts.isEmpty) {
+      return 'Add child name, caregiver name, and a few support choices so Buddy can build a useful summary here.';
+    }
+    return parts.join(' ');
   }
 
   @override
   Widget build(BuildContext context) {
     final completion = _profileCompletionScore;
-    final profileHeadline = _nameController.text.trim().isNotEmpty
-        ? _nameController.text.trim()
-        : widget.profileId;
+    final profileHeadline = _childNameController.text.trim().isNotEmpty
+        ? _childNameController.text.trim()
+        : (_nameController.text.trim().isNotEmpty
+            ? _nameController.text.trim()
+            : widget.profileId);
 
     return Scaffold(
       appBar: AppBar(
@@ -268,7 +358,7 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'This page teaches Buddy how to respond more personally. Add only the details that actually help in stressful moments: names, calming preferences, triggers, routines, and safety notes.',
+                  'This page teaches Buddy how to respond more personally. Fill only the essentials, then choose the support patterns that usually help.',
                   style: TextStyle(color: NeuroColors.textSecondary),
                 ),
                 const SizedBox(height: 14),
@@ -307,7 +397,7 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                 const _GuideBullet(
                   title: 'Profile details',
                   text:
-                      'Who is being supported, who usually assists, and one or two important support notes.',
+                      'Only the essentials: child name, caregiver name, and a simple profile label if you want one.',
                 ),
                 const SizedBox(height: 8),
                 const _GuideBullet(
@@ -330,18 +420,18 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '1. Basic profile summary',
+                  '1. Essential details',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Keep this short. These fields make later summaries and memory retrieval easier to understand.',
+                  'You do not need a long form. Start with the child and caregiver names. Everything else can be added later.',
                   style: TextStyle(color: NeuroColors.textSecondary),
                 ),
                 const SizedBox(height: 12),
                 _LabeledField(
-                  label: 'Display name for this profile',
-                  hintText: 'Example: Joy - evening support profile',
+                  label: 'Optional profile label',
+                  hintText: 'Example: Joy - evening routine',
                   controller: _nameController,
                 ),
                 const SizedBox(height: 12),
@@ -358,12 +448,35 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                 ),
                 const SizedBox(height: 12),
                 _LabeledField(
-                  label: 'One-paragraph support summary',
-                  hintText:
-                      'Example: Joy responds best to soft voice, simple steps, and a short pause before new instructions.',
+                  label: 'Anything else Buddy should know?',
+                  hintText: 'Optional detail not covered by the choices below.',
                   controller: _notesController,
                   minLines: 3,
                   maxLines: 5,
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: NeuroColors.surfaceVariant,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Live summary preview',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _generatedSummary,
+                        style:
+                            const TextStyle(color: NeuroColors.textSecondary),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 14),
                 SizedBox(
@@ -389,15 +502,73 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '2. Add a memory note',
+                  '2. Support preferences',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Use this for recurring details Buddy should remember across sessions.',
+                  'Choose the patterns that best describe what usually triggers distress and what usually helps.',
                   style: TextStyle(color: NeuroColors.textSecondary),
                 ),
                 const SizedBox(height: 14),
+                _ChoiceSection(
+                  title: 'Common triggers',
+                  options: _triggerOptions,
+                  selected: _selectedTriggers,
+                  onTap: (value) => _toggleSelection(_selectedTriggers, value),
+                ),
+                const SizedBox(height: 12),
+                _ChoiceSection(
+                  title: 'Helpful calming supports',
+                  options: _calmingOptions,
+                  selected: _selectedCalmingSupports,
+                  onTap: (value) =>
+                      _toggleSelection(_selectedCalmingSupports, value),
+                ),
+                const SizedBox(height: 12),
+                _ChoiceSection(
+                  title: 'Best communication style',
+                  options: _communicationOptions,
+                  selected: _selectedCommunicationPrefs,
+                  onTap: (value) =>
+                      _toggleSelection(_selectedCommunicationPrefs, value),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _SectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '3. Optional memory note',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Only use this if there is something important that does not fit the choices above.',
+                  style: TextStyle(color: NeuroColors.textSecondary),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _memoryCategories
+                      .map(
+                        (category) => ChoiceChip(
+                          label: Text(category),
+                          selected: _selectedMemoryCategory == category,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectedMemoryCategory = category;
+                            });
+                          },
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -413,15 +584,9 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                 ),
                 const SizedBox(height: 12),
                 _LabeledField(
-                  label: 'Category',
-                  hintText: 'trigger, calming, routine, safety, preference',
-                  controller: _memoryCategoryController,
-                ),
-                const SizedBox(height: 12),
-                _LabeledField(
                   label: 'Memory note',
                   hintText:
-                      'Example: Offer slow breathing prompt before asking any follow-up questions.',
+                      'Example: If distress escalates, give one calm instruction and wait before speaking again.',
                   controller: _memoryNoteController,
                   minLines: 3,
                   maxLines: 5,
@@ -471,7 +636,7 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '3. Stored memory',
+                  '4. Stored memory',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 10),
@@ -640,6 +805,44 @@ class _StatPill extends StatelessWidget {
           Text(label, style: const TextStyle(color: NeuroColors.textSecondary)),
         ],
       ),
+    );
+  }
+}
+
+class _ChoiceSection extends StatelessWidget {
+  const _ChoiceSection({
+    required this.title,
+    required this.options,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final List<String> options;
+  final Set<String> selected;
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: options
+              .map(
+                (option) => FilterChip(
+                  label: Text(option),
+                  selected: selected.contains(option),
+                  onSelected: (_) => onTap(option),
+                ),
+              )
+              .toList(),
+        ),
+      ],
     );
   }
 }

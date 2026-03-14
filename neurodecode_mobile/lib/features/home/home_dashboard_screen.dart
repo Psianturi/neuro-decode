@@ -243,8 +243,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   icon: const Icon(Icons.psychology_alt_outlined),
                   label: Text(
                     _activeProfileId == null || _activeProfileId!.isEmpty
-                        ? 'SET PROFILE IN SUPPORT TO OPEN MEMORY'
-                        : 'OPEN PROFILE MEMORY',
+                        ? 'SET PROFILE IN SUPPORT TO OPEN WORKSPACE'
+                        : 'OPEN PROFILE WORKSPACE',
                   ),
                 ),
               ),
