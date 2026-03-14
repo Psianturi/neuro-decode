@@ -80,7 +80,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isManualClose = false;
   bool _backendFatalError = false;
   bool _profileMemoryLoaded = false;
+  String? _profileMemoryProfileId;
   int _profileMemoryLineCount = 0;
+  List<String> _profileMemoryCues = const <String>[];
   bool _cameraPreviewPaused = false;
   Offset _cameraPreviewOffset = const Offset(0, 0);
   int _currentTurnAudioBytes = 0;
@@ -267,6 +269,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _onMessageReceived(dynamic message) {
+    if (!mounted || _isCleaningUp) {
+      return;
+    }
     try {
       final data = jsonDecode(message as String);
       final type = data['type'];
@@ -404,7 +409,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
           if (mounted) {
             setState(() {
               _profileMemoryLoaded = true;
+              _profileMemoryProfileId = profileId;
               _profileMemoryLineCount = lineCount;
+              _profileMemoryCues = cues;
             });
           }
           _addLog(
@@ -971,12 +978,19 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+      if (!mounted || _isCleaningUp) {
+        return;
+      }
+      try {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      } catch (_) {
+        // Ignore late scroll callbacks after dispose.
       }
     });
   }
@@ -1004,7 +1018,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _lastUserChunkAt = null;
     _pendingGeminiTranscript = '';
     _profileMemoryLoaded = false;
+    _profileMemoryProfileId = null;
     _profileMemoryLineCount = 0;
+    _profileMemoryCues = const <String>[];
 
     if (mounted) {
       if (!_backendFatalError) {
@@ -1151,6 +1167,24 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                   color: _getStateColor(_state),
                 ),
               ),
+              if (_profileMemoryLoaded)
+                Container(
+                  margin: const EdgeInsets.only(top: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: NeuroColors.secondary.withValues(alpha: 0.95),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'Memory Active${_profileMemoryProfileId != null ? ': ${_profileMemoryProfileId!}' : ''}',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
             ],
           ),
           actions: [
@@ -1186,6 +1220,27 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+              ),
+            if (_profileMemoryLoaded && _profileMemoryCues.isNotEmpty)
+              IconButton(
+                onPressed: () {
+                  final content = _profileMemoryCues.join('\n');
+                  showDialog<void>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Memory Cues in This Session'),
+                      content: Text(content),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.psychology_alt_outlined),
+                tooltip: 'View memory cues',
               ),
             if (widget.observerEnabled)
               IconButton(

@@ -187,9 +187,37 @@ class _SessionCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
-          subtitle: Text(
-            '${_formatTime(summary.timestampUtc)} • ${summary.durationMinutes} min • ${summary.closeReasonLabel}',
-            style: const TextStyle(color: NeuroColors.textSecondary),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${_formatTime(summary.timestampUtc)} • ${summary.durationMinutes} min • ${summary.closeReasonLabel}',
+                style: const TextStyle(color: NeuroColors.textSecondary),
+              ),
+              if (summary.memoryAssisted)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: NeuroColors.surfaceVariant,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: NeuroColors.primary),
+                    ),
+                    child: Text(
+                      summary.memoryProfileId.isEmpty
+                          ? 'Memory Assisted'
+                          : 'Memory Assisted • ${summary.memoryProfileId}',
+                      style: const TextStyle(
+                        color: NeuroColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           leading: const Icon(Icons.event_note, color: NeuroColors.primary),
           children: [

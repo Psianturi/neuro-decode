@@ -9,6 +9,8 @@ class SessionSummary {
     required this.timestampUtc,
     required this.durationMinutes,
     required this.closeReason,
+    required this.memoryAssisted,
+    required this.memoryProfileId,
     required this.title,
     required this.triggersVisual,
     required this.triggersAudio,
@@ -20,6 +22,8 @@ class SessionSummary {
   final String timestampUtc;
   final int durationMinutes;
   final String closeReason;
+  final bool memoryAssisted;
+  final String memoryProfileId;
   final String title;
   final String triggersVisual;
   final String triggersAudio;
@@ -77,6 +81,8 @@ class SessionSummary {
       timestampUtc: pick(json, 'timestamp_utc', '-'),
       durationMinutes: parseInt(json['duration_minutes'], 0),
       closeReason: pick(json, 'close_reason', '-'),
+      memoryAssisted: json['memory_assisted'] == true,
+      memoryProfileId: pick(json, 'memory_profile_id', ''),
       title: pick(structured, 'title', 'Session Summary'),
       triggersVisual: pick(structured, 'triggers_visual', '-'),
       triggersAudio: pick(structured, 'triggers_audio', '-'),

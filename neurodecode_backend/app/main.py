@@ -664,6 +664,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     "duration_seconds": duration_seconds,
                     "duration_minutes": duration_minutes,
                     "close_reason": close_reason,
+                    "memory_assisted": profile_memory_loaded,
+                    "memory_profile_id": profile_id,
                     "summary_text": summary,
                     "stats": {
                         "audio_trigger_count": len(observer_audio_log),

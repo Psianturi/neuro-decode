@@ -1,6 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart';
+
 class MascotBuddyScreen extends StatefulWidget {
   const MascotBuddyScreen({
     super.key,
@@ -97,10 +99,10 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F2EA),
+      backgroundColor: NeuroColors.background,
       appBar: AppBar(
         title: const Text('Meet Buddy!'),
-        backgroundColor: const Color(0xFFF7F2EA),
+        backgroundColor: NeuroColors.background,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -121,7 +123,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: NeuroColors.surface,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: ClipRRect(
@@ -140,7 +142,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
             'Tap Buddy to wave hello',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Color(0xFF7BA6D4),
+              color: NeuroColors.primary,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -148,18 +150,18 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: NeuroColors.surface,
               borderRadius: BorderRadius.circular(18),
             ),
             child: Column(
               children: [
                 const Text(
-                  'Hi! I am Buddy! 👋',
+                  'Hi! I am Buddy',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 34,
+                    fontSize: 32,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF75A9DE),
+                    color: NeuroColors.primary,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -167,7 +169,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                   _phrases[_phraseIndex],
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    color: Color(0xFF607585),
+                    color: NeuroColors.textSecondary,
                     height: 1.5,
                     fontSize: 16,
                   ),
@@ -181,17 +183,20 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                     _BuddyActionChip(
                       label: 'How it works',
                       selected: _selectedGuide == 'overview',
-                      onPressed: () => setState(() => _selectedGuide = 'overview'),
+                      onPressed: () =>
+                          setState(() => _selectedGuide = 'overview'),
                     ),
                     _BuddyActionChip(
                       label: 'Breathe',
                       selected: _selectedGuide == 'breathe',
-                      onPressed: () => setState(() => _selectedGuide = 'breathe'),
+                      onPressed: () =>
+                          setState(() => _selectedGuide = 'breathe'),
                     ),
                     _BuddyActionChip(
                       label: 'Privacy',
                       selected: _selectedGuide == 'privacy',
-                      onPressed: () => setState(() => _selectedGuide = 'privacy'),
+                      onPressed: () =>
+                          setState(() => _selectedGuide = 'privacy'),
                     ),
                   ],
                 ),
@@ -202,7 +207,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: NeuroColors.surface,
               borderRadius: BorderRadius.circular(18),
             ),
             child: Column(
@@ -213,14 +218,14 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF2F4761),
+                    color: NeuroColors.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 10),
                 Text(
                   _guideBody,
                   style: const TextStyle(
-                    color: Color(0xFF607585),
+                    color: NeuroColors.textSecondary,
                     height: 1.55,
                     fontSize: 15,
                   ),
@@ -258,13 +263,13 @@ class _BuddyActionChip extends StatelessWidget {
     return ActionChip(
       onPressed: onPressed,
       backgroundColor:
-          selected ? const Color(0xFF75A9DE) : const Color(0xFFE9F0FB),
+          selected ? NeuroColors.primary : NeuroColors.surfaceVariant,
       side: BorderSide.none,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       label: Text(
         label,
         style: TextStyle(
-          color: selected ? Colors.white : const Color(0xFF75A9DE),
+          color: selected ? Colors.white : NeuroColors.primary,
           fontWeight: FontWeight.w600,
         ),
       ),
