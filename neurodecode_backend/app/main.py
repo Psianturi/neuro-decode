@@ -11,7 +11,7 @@ from urllib import request as urlrequest
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, WebSocket, WebSocketDisconnect
 from google import genai
 
 from app.ai_processor import ai_engine
@@ -20,6 +20,7 @@ from app.memory_context import build_private_memory_context
 from app.notification_store import NotificationStore
 from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
+from app.rule_debug_store import RuleDebugStore
 from app.session_store import SessionStore
 from app.settings import get_settings
 
@@ -291,6 +292,22 @@ def _build_rule_notification(
     return payload
 
 
+def _is_admin_authorized(
+    *,
+    admin_token_query: str | None,
+    admin_token_header: str | None,
+) -> bool:
+    if not _startup_settings.admin_debug_enabled:
+        return False
+    expected = (_startup_settings.admin_debug_token or "").strip()
+    if not expected:
+        return False
+    provided = (admin_token_query or admin_token_header or "").strip()
+    if not provided:
+        return False
+    return provided == expected
+
+
 async def _build_rule_notifications(
     *,
     session_id: str,
@@ -304,9 +321,35 @@ async def _build_rule_notifications(
 
     now = datetime.now(timezone.utc).isoformat()
     out: list[dict[str, object]] = []
+    evaluations: list[dict[str, object]] = []
+
+    def mark_evaluation(
+        *,
+        rule_id: str,
+        triggered: bool,
+        severity: str,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        row: dict[str, object] = {
+            "rule_id": rule_id,
+            "triggered": triggered,
+            "severity": severity,
+            "reason": reason,
+        }
+        if metadata:
+            row["metadata"] = dict(metadata)
+        evaluations.append(row)
 
     follow_up = structured.get("FOLLOW_UP", "").strip()
     if _is_meaningful_summary_value(follow_up):
+        mark_evaluation(
+            rule_id="session_follow_up",
+            triggered=True,
+            severity="info",
+            reason="Meaningful follow-up text detected in summary.",
+            metadata={"duration_minutes": duration_minutes},
+        )
         out.append(
             _build_rule_notification(
                 now=now,
@@ -324,6 +367,13 @@ async def _build_rule_notifications(
                 },
             )
         )
+    else:
+        mark_evaluation(
+            rule_id="session_follow_up",
+            triggered=False,
+            severity="info",
+            reason="Follow-up text considered weak/non-actionable.",
+        )
 
     if profile_id:
         recent = await session_store.list_recent(3, user_id=user_id, profile_id=profile_id)
@@ -340,6 +390,13 @@ async def _build_rule_notifications(
 
         if strong_audio_count >= 2:
             severity = _severity_for_repeated_trigger(strong_audio_count)
+            mark_evaluation(
+                rule_id="repeated_audio_trigger",
+                triggered=True,
+                severity=severity,
+                reason="Recent sessions show repeated meaningful audio triggers.",
+                metadata={"recent_strong_audio_count": strong_audio_count},
+            )
             out.append(
                 _build_rule_notification(
                     now=now,
@@ -360,9 +417,24 @@ async def _build_rule_notifications(
                     },
                 )
             )
+        else:
+            mark_evaluation(
+                rule_id="repeated_audio_trigger",
+                triggered=False,
+                severity="info",
+                reason="Audio trigger threshold not met.",
+                metadata={"recent_strong_audio_count": strong_audio_count},
+            )
 
         if strong_visual_count >= 2:
             severity = _severity_for_repeated_trigger(strong_visual_count)
+            mark_evaluation(
+                rule_id="repeated_visual_trigger",
+                triggered=True,
+                severity=severity,
+                reason="Recent sessions show repeated meaningful visual triggers.",
+                metadata={"recent_strong_visual_count": strong_visual_count},
+            )
             out.append(
                 _build_rule_notification(
                     now=now,
@@ -383,12 +455,30 @@ async def _build_rule_notifications(
                     },
                 )
             )
+        else:
+            mark_evaluation(
+                rule_id="repeated_visual_trigger",
+                triggered=False,
+                severity="info",
+                reason="Visual trigger threshold not met.",
+                metadata={"recent_strong_visual_count": strong_visual_count},
+            )
 
         profile = await profile_store.get_profile(profile_id, user_id=user_id)
         if profile is not None:
             child_name = str(profile.get("child_name") or "").strip()
             caregiver_name = str(profile.get("caregiver_name") or "").strip()
             if not child_name or not caregiver_name:
+                mark_evaluation(
+                    rule_id="profile_incomplete",
+                    triggered=True,
+                    severity="action_required",
+                    reason="Profile is missing child and/or caregiver name.",
+                    metadata={
+                        "child_name_present": bool(child_name),
+                        "caregiver_name_present": bool(caregiver_name),
+                    },
+                )
                 out.append(
                     _build_rule_notification(
                         now=now,
@@ -403,6 +493,40 @@ async def _build_rule_notifications(
                         fallback_action="At minimum, set child name to improve personalized prompts.",
                     )
                 )
+            else:
+                mark_evaluation(
+                    rule_id="profile_incomplete",
+                    triggered=False,
+                    severity="info",
+                    reason="Profile essentials are complete.",
+                )
+        else:
+            mark_evaluation(
+                rule_id="profile_incomplete",
+                triggered=False,
+                severity="info",
+                reason="Profile not found; completeness rule skipped.",
+            )
+
+    if _startup_settings.admin_debug_enabled:
+        await rule_debug_store.add(
+            {
+                "timestamp_utc": now,
+                "session_id": session_id,
+                "user_id": user_id,
+                "profile_id": profile_id,
+                "duration_minutes": duration_minutes,
+                "evaluations": evaluations,
+                "notifications_created": [
+                    {
+                        "rule_id": str(item.get("rule_id") or ""),
+                        "severity": str(item.get("severity") or ""),
+                        "title": str(item.get("title") or ""),
+                    }
+                    for item in out
+                ],
+            }
+        )
 
     out.sort(
         key=lambda item: (
@@ -470,6 +594,7 @@ notification_store = NotificationStore(
     notification_collection=_startup_settings.firestore_notification_collection,
     firestore_project=_startup_settings.firestore_project,
 )
+rule_debug_store = RuleDebugStore(max_items=_startup_settings.admin_debug_max_items)
 
 
 def _format_telegram_message(*, duration_seconds: int, summary_text: str) -> str:
@@ -582,6 +707,40 @@ async def notifications_mark_read(
     return {
         "status": "ok",
         "notification_id": notification_id,
+    }
+
+
+@app.get("/admin/rules/debug")
+async def admin_rules_debug(
+    admin_token: str | None = None,
+    user_id: str | None = None,
+    profile_id: str | None = None,
+    rule_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 20,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not _is_admin_authorized(
+        admin_token_query=admin_token,
+        admin_token_header=x_admin_token,
+    ):
+        return {
+            "status": "forbidden",
+            "message": "Admin debug endpoint is disabled or token is invalid.",
+        }
+
+    safe_limit = max(1, min(limit, 100))
+    rows = await rule_debug_store.list_recent(
+        limit=safe_limit,
+        user_id=user_id,
+        profile_id=profile_id,
+        rule_id=rule_id,
+        session_id=session_id,
+    )
+    return {
+        "status": "ok",
+        "count": len(rows),
+        "items": rows,
     }
 
 
