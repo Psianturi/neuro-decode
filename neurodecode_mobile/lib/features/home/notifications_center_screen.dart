@@ -163,16 +163,21 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
             for (final item in _items)
               Card(
                 margin: const EdgeInsets.only(bottom: 10),
+                color: _severityBackground(item.severity),
                 child: ListTile(
                   leading: Icon(
-                    item.isUnread
-                        ? Icons.mark_email_unread_outlined
-                        : Icons.drafts_outlined,
-                    color: item.isUnread
-                        ? NeuroColors.primary
-                        : NeuroColors.textSecondary,
+                    _severityIcon(item.severity, unread: item.isUnread),
+                    color: _severityColor(item.severity, unread: item.isUnread),
                   ),
-                  title: Text(item.title),
+                  title: Text(
+                    item.title,
+                    style: TextStyle(
+                      fontWeight:
+                          item.severity.toLowerCase() == 'action_required'
+                              ? FontWeight.w800
+                              : FontWeight.w700,
+                    ),
+                  ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -183,6 +188,16 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
                         _formatTime(item.createdAtUtc),
                         style:
                             const TextStyle(color: NeuroColors.textSecondary),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.severity.toUpperCase().replaceAll('_', ' '),
+                        style: TextStyle(
+                          color: _severityColor(item.severity,
+                              unread: item.isUnread),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ],
                   ),
@@ -205,6 +220,43 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
     } catch (_) {
       return raw;
     }
+  }
+
+  static IconData _severityIcon(String severity, {required bool unread}) {
+    final value = severity.toLowerCase();
+    if (value == 'warning') {
+      return unread
+          ? Icons.warning_amber_rounded
+          : Icons.warning_amber_outlined;
+    }
+    if (value == 'action_required') {
+      return unread
+          ? Icons.priority_high_rounded
+          : Icons.priority_high_outlined;
+    }
+    return unread ? Icons.mark_email_unread_outlined : Icons.drafts_outlined;
+  }
+
+  static Color _severityColor(String severity, {required bool unread}) {
+    final value = severity.toLowerCase();
+    if (value == 'warning') {
+      return unread ? const Color(0xFFB26A00) : const Color(0xFF8A7B62);
+    }
+    if (value == 'action_required') {
+      return unread ? const Color(0xFF9A2F2F) : const Color(0xFF7C5C5C);
+    }
+    return unread ? NeuroColors.primary : NeuroColors.textSecondary;
+  }
+
+  static Color? _severityBackground(String severity) {
+    final value = severity.toLowerCase();
+    if (value == 'warning') {
+      return const Color(0xFFFFF7E8);
+    }
+    if (value == 'action_required') {
+      return const Color(0xFFFFEFEF);
+    }
+    return null;
   }
 }
 

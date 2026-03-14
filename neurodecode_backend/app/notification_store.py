@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -61,6 +62,15 @@ class NotificationStore:
             for record in records:
                 self._memory.appendleft(dict(record))
 
+    def _stable_rule_notification_id(self, record: dict[str, object]) -> str | None:
+        user_id = str(record.get("user_id") or "").strip()
+        rule_id = str(record.get("rule_id") or "").strip()
+        if not user_id or not rule_id:
+            return None
+        profile_id = str(record.get("profile_id") or "").strip()
+        seed = f"{user_id}|{profile_id}|{rule_id}"
+        return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:32]
+
     def _add_many_firestore(self, records: list[dict[str, object]]) -> None:
         client = self._get_client()
         if client is None:
@@ -86,22 +96,29 @@ class NotificationStore:
         if client is None:
             raise RuntimeError("Firestore client unavailable")
 
-        query = client.collection(self._notification_collection)
-        if user_id:
-            query = query.where("user_id", "==", user_id)
-        if profile_id:
-            query = query.where("profile_id", "==", profile_id)
-        if status:
-            query = query.where("status", "==", status)
-
-        query = query.order_by("created_at_utc", direction=firestore.Query.DESCENDING).limit(limit)
+        # Fetch by time first and apply scope filters in Python to avoid
+        # requiring composite Firestore indexes for every filter combination.
+        scan_limit = max(limit * 6, 120)
+        query = (
+            client.collection(self._notification_collection)
+            .order_by("created_at_utc", direction=firestore.Query.DESCENDING)
+            .limit(scan_limit)
+        )
 
         out: list[dict[str, object]] = []
         for doc in query.stream():
             item = dict(doc.to_dict() or {})
             item["notification_id"] = doc.id
-            out.append(item)
-        return out
+            if self._matches_scope(
+                item,
+                user_id=user_id,
+                profile_id=profile_id,
+                status=status,
+            ):
+                out.append(item)
+            if len(out) >= limit:
+                break
+        return out[:limit]
 
     def _mark_read_firestore(self, notification_id: str) -> bool:
         client = self._get_client()
@@ -131,7 +148,11 @@ class NotificationStore:
         now = datetime.now(timezone.utc).isoformat()
         for record in records:
             item = dict(record)
-            item.setdefault("notification_id", uuid4().hex)
+            stable_id = self._stable_rule_notification_id(item)
+            if stable_id:
+                item["notification_id"] = stable_id
+            else:
+                item.setdefault("notification_id", uuid4().hex)
             item.setdefault("created_at_utc", now)
             item.setdefault("updated_at_utc", now)
             item.setdefault("status", "unread")

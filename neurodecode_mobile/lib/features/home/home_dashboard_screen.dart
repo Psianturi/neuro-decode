@@ -35,10 +35,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   ProfileMemoryContext? _profileContext;
   bool _isLoadingSummary = false;
   bool _isLoadingNotifications = false;
+  bool _isCheckingUnreadSync = false;
   bool _isLoadingProfile = false;
   bool _isCheckingProfileId = false;
   String? _activeProfileId;
   int _unreadNotificationCount = 0;
+  DateTime? _lastUnreadSyncAt;
 
   @override
   void initState() {
@@ -86,6 +88,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       }
     }).whenComplete(() {
       _isCheckingProfileId = false;
+    });
+  }
+
+  void _scheduleUnreadSync() {
+    if (_isCheckingUnreadSync || _isLoadingNotifications) {
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastUnreadSyncAt != null &&
+        now.difference(_lastUnreadSyncAt!) < const Duration(seconds: 20)) {
+      return;
+    }
+
+    _isCheckingUnreadSync = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshUnreadNotifications().whenComplete(() {
+        _lastUnreadSyncAt = DateTime.now();
+        _isCheckingUnreadSync = false;
+      });
     });
   }
 
@@ -192,11 +213,61 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
+  Future<void> _openNotificationsCenter() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotificationsCenterScreen(
+          service: _notificationService,
+        ),
+      ),
+    );
+    await _refreshUnreadNotifications();
+  }
+
   @override
   Widget build(BuildContext context) {
     _scheduleProfileIdSync();
+    _scheduleUnreadSync();
     return Scaffold(
-      appBar: AppBar(title: const Text('NeuroDecode AI')),
+      appBar: AppBar(
+        title: const Text('NeuroDecode AI'),
+        actions: [
+          IconButton(
+            onPressed: _openNotificationsCenter,
+            tooltip: 'Notifications',
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.notifications_none),
+                if (_unreadNotificationCount > 0)
+                  Positioned(
+                    right: -6,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade500,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        _unreadNotificationCount > 99
+                            ? '99+'
+                            : '$_unreadNotificationCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -273,53 +344,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 summary: _latestSummary,
                 isLoading: _isLoadingSummary,
                 onRefresh: _refreshLatestSummary,
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 46,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => NotificationsCenterScreen(
-                          service: _notificationService,
-                        ),
-                      ),
-                    );
-                    await _refreshUnreadNotifications();
-                  },
-                  icon: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      const Icon(Icons.notifications_none),
-                      if (_unreadNotificationCount > 0)
-                        Positioned(
-                          right: -7,
-                          top: -6,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade500,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              _unreadNotificationCount > 99
-                                  ? '99+'
-                                  : '$_unreadNotificationCount',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  label: const Text('VIEW NOTIFICATIONS'),
-                ),
               ),
               const SizedBox(height: 12),
               SizedBox(

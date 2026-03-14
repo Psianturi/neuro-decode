@@ -63,7 +63,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       FlutterSoundPlayer(logLevel: Level.warning);
   final bool _preferNativeAndroidPcm =
       defaultTargetPlatform == TargetPlatform.android;
-  bool _nativeAndroidPcmAvailable = true;
   bool _isPlayerReady = false;
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
@@ -352,7 +351,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         Future.delayed(const Duration(milliseconds: 600), () {
           if (mounted && _geminiTurnComplete) {
             _setStateLabel(AgentState.idle);
-            if (!(_preferNativeAndroidPcm && _nativeAndroidPcmAvailable)) {
+            if (!_preferNativeAndroidPcm) {
               _schedulePlayerIdleClose();
             }
           }
@@ -745,7 +744,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   Future<void> _doFeedAudio(Uint8List pcm) async {
     if (!_isPlayerReady) return;
     _cancelPlayerIdleClose();
-    if (_preferNativeAndroidPcm && _nativeAndroidPcmAvailable) {
+    if (_preferNativeAndroidPcm) {
       await _feedNativeAndroidPcm(pcm);
       return;
     }
@@ -767,40 +766,40 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   Future<void> _feedNativeAndroidPcm(Uint8List pcm) async {
-    if (!_isPlayerStreamOpen) {
+    var attempts = 0;
+    while (attempts < 2) {
       try {
-        await _nativeAudioChannel.invokeMethod<void>('initPlayer', {
-          'sampleRate': _playerSampleRate,
-          'channelCount': _geminiOutputChannels,
-          'bufferBytes': _playerBufferSize,
+        if (!_isPlayerStreamOpen) {
+          await _nativeAudioChannel.invokeMethod<void>('initPlayer', {
+            'sampleRate': _playerSampleRate,
+            'channelCount': _geminiOutputChannels,
+            'bufferBytes': _playerBufferSize,
+          });
+          _isPlayerStreamOpen = true;
+          _logDebug(
+            'player_event',
+            'Native PCM stream opened at ${_playerSampleRate}Hz (channels: $_geminiOutputChannels)',
+          );
+        }
+
+        await _nativeAudioChannel.invokeMethod<void>('writePcm', {
+          'bytes': pcm,
         });
-        _isPlayerStreamOpen = true;
-        _logDebug(
-          'player_event',
-          'Native PCM stream opened at ${_playerSampleRate}Hz (channels: $_geminiOutputChannels)',
-        );
-      } on PlatformException catch (e) {
-        _nativeAndroidPcmAvailable = false;
-        _logDebug('player_event',
-            'Native PCM init failed, falling back: ${e.message}');
-        await _soundPlayer.openPlayer();
-        _isPlayerReady = true;
-        await _doFeedAudio(pcm);
         return;
+      } on PlatformException catch (e) {
+        attempts += 1;
+        _isPlayerStreamOpen = false;
+        _logDebug('player_event',
+            'Native PCM error (attempt $attempts): ${e.message}');
+        try {
+          await _nativeAudioChannel.invokeMethod<void>('releasePlayer');
+        } catch (_) {}
+        if (attempts >= 2) {
+          _addLog(
+              'System', 'Audio output is recovering. Please wait a moment.');
+          return;
+        }
       }
-    }
-    try {
-      await _nativeAudioChannel.invokeMethod<void>('writePcm', {
-        'bytes': pcm,
-      });
-    } on PlatformException catch (e) {
-      _nativeAndroidPcmAvailable = false;
-      _isPlayerStreamOpen = false;
-      _logDebug('player_event',
-          'Native PCM write failed, falling back: ${e.message}');
-      await _soundPlayer.openPlayer();
-      _isPlayerReady = true;
-      await _doFeedAudio(pcm);
     }
   }
 
@@ -808,7 +807,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _cancelPlayerIdleClose();
     _flushPendingAudio();
     if (_isPlayerStreamOpen) {
-      if (_preferNativeAndroidPcm && _nativeAndroidPcmAvailable) {
+      if (_preferNativeAndroidPcm) {
         _logDebug(
             'player_event', 'native PCM player kept alive across idle turn');
         return;
@@ -825,7 +824,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _cancelPlayerIdleClose();
     _clearPendingAudio();
     if (_isPlayerStreamOpen) {
-      if (_preferNativeAndroidPcm && _nativeAndroidPcmAvailable) {
+      if (_preferNativeAndroidPcm) {
         _nativeAudioChannel.invokeMethod<void>('flushPlayer');
         _feedChain = null;
         _logDebug('player_event', 'native PCM queue flushed');
@@ -1047,7 +1046,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _stopPlayerStreamNow();
     _audioFlushTimer?.cancel();
     _playerIdleTimer?.cancel();
-    if (_preferNativeAndroidPcm && _nativeAndroidPcmAvailable) {
+    if (_preferNativeAndroidPcm) {
       _nativeAudioChannel.invokeMethod<void>('releasePlayer');
     } else {
       _soundPlayer.closePlayer();
