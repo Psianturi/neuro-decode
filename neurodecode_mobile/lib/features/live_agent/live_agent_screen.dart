@@ -79,6 +79,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isCleaningUp = false;
   bool _isManualClose = false;
   bool _backendFatalError = false;
+  bool _profileMemoryLoaded = false;
+  int _profileMemoryLineCount = 0;
   int _currentTurnAudioBytes = 0;
   DateTime? _currentTurnStartedAt;
 
@@ -360,18 +362,68 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       }
 
       if (type == 'observer_note') {
-        final text = (data['text'] ?? '').toString();
+        final raw = (data['text'] ?? '').toString();
+        final text = _sanitizeObserverNote(raw);
         if (text.isNotEmpty) {
           _addObserverEvent(
             text: text,
             confidence: ObserverConfidence.medium,
           );
         }
+        return;
+      }
+
+      if (type == 'profile_memory_status') {
+        final loaded = (data['loaded'] ?? false) == true;
+        if (loaded) {
+          final profileId = (data['profile_id'] ?? '').toString();
+          final lineCount = (data['line_count'] ?? 0) as int;
+          if (mounted) {
+            setState(() {
+              _profileMemoryLoaded = true;
+              _profileMemoryLineCount = lineCount;
+            });
+          }
+          _addLog(
+            'System',
+            'Profile memory active for $profileId ($lineCount context lines).',
+          );
+        }
+        return;
       }
     } catch (e) {
       _logDebug('ws_event', 'ERROR processing message: $e');
       _addLog('Error', 'Failed to process message: $e');
     }
+  }
+
+  String _sanitizeObserverNote(String input) {
+    var out = input.trim();
+    out = out.replaceFirst(
+      RegExp(r'^\[(Audio|Visual) Observer Note\]\s*', caseSensitive: false),
+      '',
+    );
+    return out.trim();
+  }
+
+  String _sanitizeAgentText(String input) {
+    var out = input.trim();
+    out = out.replaceFirst(
+      RegExp(r'^\[(Audio|Visual) Observer Note\]\s*', caseSensitive: false),
+      '',
+    );
+    out = out.replaceFirst(
+      RegExp(
+        r'^INTERNAL SENSOR NOTE \(PRIVATE CONTEXT - DO NOT REPEAT VERBATIM TO USER\):\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    out = out.replaceFirst(
+      RegExp(r'^translate\s*', caseSensitive: false),
+      '',
+    );
+    return out.trim();
   }
 
   void _addObserverEvent({
@@ -799,7 +851,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _appendGeminiChunk(String chunk) {
-    final normalized = chunk.trim();
+    final normalized = _sanitizeAgentText(chunk);
     if (normalized.isEmpty || !mounted) return;
 
     final now = DateTime.now();
@@ -831,7 +883,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   void _bufferGeminiTranscript(String chunk) {
-    final normalized = chunk.trim();
+    final normalized = _sanitizeAgentText(chunk);
     if (normalized.isEmpty) return;
 
     final needsSpace = _pendingGeminiTranscript.isNotEmpty &&
@@ -922,6 +974,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _lastGeminiChunkAt = null;
     _lastUserChunkAt = null;
     _pendingGeminiTranscript = '';
+    _profileMemoryLoaded = false;
+    _profileMemoryLineCount = 0;
 
     if (mounted) {
       if (!_backendFatalError) {
@@ -1030,258 +1084,304 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Live Session'),
-            Text(
-              _stateLabel,
-              style: TextStyle(
-                fontSize: 12,
-                color: _getStateColor(_state),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: _isConnected ? Colors.green : Colors.red,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              _isConnected ? 'Live' : 'Offline',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+    final navigator = Navigator.of(context);
+    return PopScope(
+      canPop: !_isConnected,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) {
+          return;
+        }
+        if (_isConnected) {
+          await _disconnect();
+        }
+        if (mounted) {
+          navigator.pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              if (_isConnected) {
+                await _disconnect();
+              }
+              if (mounted) {
+                navigator.maybePop();
+              }
+            },
           ),
-          if (widget.observerEnabled)
-            IconButton(
-              onPressed: _openObserverPanel,
-              icon: const Icon(Icons.insights),
-              tooltip: 'Observer Panel',
-            ),
-          IconButton(
-            onPressed: _openDebugLog,
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Debug Log',
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          Column(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-                  itemCount: _transcriptLog.length,
-                  itemBuilder: (context, index) {
-                    final entry = _transcriptLog[index];
-                    final sender = entry['sender']!;
-                    final text = entry['text']!;
-                    final isGemini = sender == 'Gemini';
-                    final isSystem = sender == 'System' || sender == 'Error';
-                    final isLight =
-                        Theme.of(context).brightness == Brightness.light;
-
-                    return Align(
-                      alignment: isSystem
-                          ? Alignment.center
-                          : (isGemini
-                              ? Alignment.centerLeft
-                              : Alignment.centerRight),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isSystem
-                              ? Colors.transparent
-                              : (isGemini
-                                  ? NeuroColors.surfaceVariant
-                                  : NeuroColors.surface),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          isSystem ? text : '$sender: $text',
-                          style: TextStyle(
-                            color: isSystem
-                                ? Colors.grey
-                                : (isLight
-                                    ? NeuroColors.textPrimary
-                                    : Colors.white),
-                            fontStyle:
-                                isSystem ? FontStyle.italic : FontStyle.normal,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+              const Text('Live Session'),
+              Text(
+                _stateLabel,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _getStateColor(_state),
                 ),
               ),
             ],
           ),
-          if (widget.observerEnabled &&
-              _cameraController != null &&
-              _cameraController!.value.isInitialized)
-            Positioned(
-              top: 20,
-              right: 16,
-              child: Container(
-                width: 120,
-                height: 160,
-                decoration: BoxDecoration(
-                  border: Border.all(color: NeuroColors.primary, width: 2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: CameraPreview(_cameraController!),
+          actions: [
+            Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _isConnected ? Colors.green : Colors.red,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                _isConnected ? 'Live' : 'Offline',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-          if (widget.observerEnabled &&
-              (_cameraController == null ||
-                  !_cameraController!.value.isInitialized))
-            Positioned(
-              top: 20,
-              right: 16,
-              child: Container(
-                width: 120,
-                height: 160,
-                padding: const EdgeInsets.all(8),
+            if (_profileMemoryLoaded)
+              Container(
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: NeuroColors.surface,
-                  border: Border.all(color: NeuroColors.primary, width: 2),
+                  color: NeuroColors.primary,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.asset(
-                    'assets/mascot02.png',
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            ),
-          Positioned(
-            bottom: 24,
-            left: 0,
-            right: 0,
-            child: Column(
-              children: [
-                // ── Mic button: only active when connected & not thinking ──
-                GestureDetector(
-                  onTap: (_isConnected &&
-                          _state != AgentState.speaking &&
-                          _state != AgentState.thinking)
-                      ? _toggleMic
-                      : (_isConnected &&
-                              _state == AgentState.speaking &&
-                              _isMicActive == false)
-                          ? null
-                          : (_isMicActive ? _toggleMic : null),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: !_isConnected
-                          ? Colors.grey.shade400
-                          : (_state == AgentState.speaking
-                              ? Colors.orange
-                              : (_isMicActive
-                                  ? Colors.redAccent
-                                  : (_state == AgentState.thinking
-                                      ? Colors.purple
-                                      : NeuroColors.primary))),
-                      shape: BoxShape.circle,
-                      boxShadow: _isMicActive
-                          ? [
-                              BoxShadow(
-                                color: Colors.red.withValues(alpha: 0.5),
-                                blurRadius: 20,
-                                spreadRadius: 5,
-                              ),
-                            ]
-                          : [],
-                    ),
-                    child: Icon(
-                      !_isConnected
-                          ? Icons.mic_off
-                          : (_state == AgentState.speaking
-                              ? Icons.volume_up
-                              : (_isMicActive
-                                  ? Icons.stop
-                                  : (_state == AgentState.thinking
-                                      ? Icons.hourglass_empty
-                                      : Icons.mic))),
-                      size: 40,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  !_isConnected
-                      ? 'Not connected'
-                      : (_state == AgentState.speaking
-                          ? 'AI is speaking... wait to finish'
-                          : (_isMicActive
-                              ? 'Recording \u2022 Tap \u25A0 to send'
-                              : (_state == AgentState.thinking
-                                  ? 'AI is thinking... please wait'
-                                  : 'Tap mic to record, then tap \u25A0 to send'))),
+                child: Text(
+                  'Memory $_profileMemoryLineCount',
                   style: const TextStyle(
-                    color: NeuroColors.textSecondary,
-                    fontSize: 12,
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 12),
+              ),
+            if (widget.observerEnabled)
+              IconButton(
+                onPressed: _openObserverPanel,
+                icon: const Icon(Icons.insights),
+                tooltip: 'Observer Panel',
+              ),
+            IconButton(
+              onPressed: _openDebugLog,
+              icon: const Icon(Icons.bug_report),
+              tooltip: 'Debug Log',
+            ),
+          ],
+        ),
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                    itemCount: _transcriptLog.length,
+                    itemBuilder: (context, index) {
+                      final entry = _transcriptLog[index];
+                      final sender = entry['sender']!;
+                      final text = entry['text']!;
+                      final isGemini = sender == 'Gemini';
+                      final isSystem = sender == 'System' || sender == 'Error';
+                      final isLight =
+                          Theme.of(context).brightness == Brightness.light;
 
-                SizedBox(
-                  width: 220,
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: _state == AgentState.connecting
-                        ? null
-                        : (_isConnected ? () async => _disconnect() : _connect),
-                    icon: Icon(
-                      _isConnected
-                          ? Icons.stop_circle_outlined
-                          : (_state == AgentState.connecting
-                              ? Icons.sync
-                              : Icons.play_circle_outline),
-                    ),
-                    label: Text(
-                      _isConnected
-                          ? 'End Session'
-                          : (_state == AgentState.connecting
-                              ? 'Connecting...'
-                              : 'Reconnect'),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isConnected
-                          ? Colors.red.shade400
-                          : NeuroColors.primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                    ),
+                      return Align(
+                        alignment: isSystem
+                            ? Alignment.center
+                            : (isGemini
+                                ? Alignment.centerLeft
+                                : Alignment.centerRight),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isSystem
+                                ? Colors.transparent
+                                : (isGemini
+                                    ? NeuroColors.surfaceVariant
+                                    : NeuroColors.surface),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            isSystem ? text : '$sender: $text',
+                            style: TextStyle(
+                              color: isSystem
+                                  ? Colors.grey
+                                  : (isLight
+                                      ? NeuroColors.textPrimary
+                                      : Colors.white),
+                              fontStyle: isSystem
+                                  ? FontStyle.italic
+                                  : FontStyle.normal,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
             ),
-          ),
-        ],
+            if (widget.observerEnabled &&
+                _cameraController != null &&
+                _cameraController!.value.isInitialized)
+              Positioned(
+                top: 20,
+                right: 16,
+                child: Container(
+                  width: 120,
+                  height: 160,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: NeuroColors.primary, width: 2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: CameraPreview(_cameraController!),
+                  ),
+                ),
+              ),
+            if (widget.observerEnabled &&
+                (_cameraController == null ||
+                    !_cameraController!.value.isInitialized))
+              Positioned(
+                top: 20,
+                right: 16,
+                child: Container(
+                  width: 120,
+                  height: 160,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: NeuroColors.surface,
+                    border: Border.all(color: NeuroColors.primary, width: 2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/mascot02.png',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+              ),
+            Positioned(
+              bottom: 24,
+              left: 0,
+              right: 0,
+              child: Column(
+                children: [
+                  // ── Mic button: only active when connected & not thinking ──
+                  GestureDetector(
+                    onTap: (_isConnected &&
+                            _state != AgentState.speaking &&
+                            _state != AgentState.thinking)
+                        ? _toggleMic
+                        : (_isConnected &&
+                                _state == AgentState.speaking &&
+                                _isMicActive == false)
+                            ? null
+                            : (_isMicActive ? _toggleMic : null),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: !_isConnected
+                            ? Colors.grey.shade400
+                            : (_state == AgentState.speaking
+                                ? Colors.orange
+                                : (_isMicActive
+                                    ? Colors.redAccent
+                                    : (_state == AgentState.thinking
+                                        ? Colors.purple
+                                        : NeuroColors.primary))),
+                        shape: BoxShape.circle,
+                        boxShadow: _isMicActive
+                            ? [
+                                BoxShadow(
+                                  color: Colors.red.withValues(alpha: 0.5),
+                                  blurRadius: 20,
+                                  spreadRadius: 5,
+                                ),
+                              ]
+                            : [],
+                      ),
+                      child: Icon(
+                        !_isConnected
+                            ? Icons.mic_off
+                            : (_state == AgentState.speaking
+                                ? Icons.volume_up
+                                : (_isMicActive
+                                    ? Icons.stop
+                                    : (_state == AgentState.thinking
+                                        ? Icons.hourglass_empty
+                                        : Icons.mic))),
+                        size: 40,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    !_isConnected
+                        ? 'Not connected'
+                        : (_state == AgentState.speaking
+                            ? 'AI is speaking... wait to finish'
+                            : (_isMicActive
+                                ? 'Recording \u2022 Tap \u25A0 to send'
+                                : (_state == AgentState.thinking
+                                    ? 'AI is thinking... please wait'
+                                    : 'Tap mic to record, then tap \u25A0 to send'))),
+                    style: const TextStyle(
+                      color: NeuroColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    width: 220,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _state == AgentState.connecting
+                          ? null
+                          : (_isConnected
+                              ? () async => _disconnect()
+                              : _connect),
+                      icon: Icon(
+                        _isConnected
+                            ? Icons.stop_circle_outlined
+                            : (_state == AgentState.connecting
+                                ? Icons.sync
+                                : Icons.play_circle_outline),
+                      ),
+                      label: Text(
+                        _isConnected
+                            ? 'End Session'
+                            : (_state == AgentState.connecting
+                                ? 'Connecting...'
+                                : 'Reconnect'),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isConnected
+                            ? Colors.red.shade400
+                            : NeuroColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

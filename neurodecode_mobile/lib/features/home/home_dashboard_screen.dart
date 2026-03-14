@@ -32,6 +32,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   ProfileMemoryContext? _profileContext;
   bool _isLoadingSummary = false;
   bool _isLoadingProfile = false;
+  bool _isCheckingProfileId = false;
   String? _activeProfileId;
 
   @override
@@ -52,6 +53,34 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     if (profileId != null && profileId.isNotEmpty) {
       await _refreshProfileSummary();
     }
+  }
+
+  void _scheduleProfileIdSync() {
+    if (_isCheckingProfileId) {
+      return;
+    }
+    _isCheckingProfileId = true;
+    _identityStore.getActiveProfileId().then((profileId) async {
+      if (!mounted || profileId == _activeProfileId) {
+        return;
+      }
+      setState(() {
+        _activeProfileId = profileId;
+      });
+      if (profileId != null && profileId.isNotEmpty) {
+        await _refreshProfileSummary();
+      } else {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _activeProfile = null;
+          _profileContext = null;
+        });
+      }
+    }).whenComplete(() {
+      _isCheckingProfileId = false;
+    });
   }
 
   Future<void> _refreshProfileSummary() async {
@@ -126,6 +155,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _scheduleProfileIdSync();
     return Scaffold(
       appBar: AppBar(title: const Text('NeuroDecode AI')),
       body: ListView(
@@ -224,31 +254,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              SizedBox(
-                height: 46,
-                child: OutlinedButton.icon(
-                  onPressed:
-                      _activeProfileId == null || _activeProfileId!.isEmpty
-                          ? null
-                          : () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ProfileMemoryScreen(
-                                    profileId: _activeProfileId!,
-                                  ),
-                                ),
-                              );
-                            },
-                  icon: const Icon(Icons.psychology_alt_outlined),
-                  label: Text(
-                    _activeProfileId == null || _activeProfileId!.isEmpty
-                        ? 'SET PROFILE IN SUPPORT TO OPEN WORKSPACE'
-                        : 'OPEN PROFILE WORKSPACE',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
               SizedBox(
                 height: 46,
                 child: OutlinedButton.icon(

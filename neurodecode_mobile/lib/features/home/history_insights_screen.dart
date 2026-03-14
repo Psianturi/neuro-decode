@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../config/app_identity_store.dart';
+import '../profile/profile_memory_service.dart';
 import '../../theme/app_theme.dart';
 import 'session_summary_service.dart';
 
@@ -17,6 +19,8 @@ class HistoryInsightsScreen extends StatefulWidget {
 }
 
 class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
+  final AppIdentityStore _identityStore = AppIdentityStore();
+  final ProfileMemoryService _profileMemoryService = ProfileMemoryService();
   bool _isLoading = false;
   String? _error;
   List<SessionSummary> _items = const <SessionSummary>[];
@@ -58,6 +62,47 @@ class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _saveSuggestedMemory({
+    required String category,
+    required String note,
+  }) async {
+    final profileId = await _identityStore.getActiveProfileId();
+    if (profileId == null || profileId.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Set an active profile in Support before saving memory.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _profileMemoryService.addMemory(
+        profileId: profileId,
+        category: category,
+        note: note,
+        confidence: 'medium',
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved to profile memory: $profileId')),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save memory: $e')),
+      );
     }
   }
 
@@ -104,7 +149,11 @@ class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
                 style: TextStyle(color: NeuroColors.textSecondary),
               ),
               const SizedBox(height: 12),
-              for (final item in _items) _SessionCard(summary: item),
+              for (final item in _items)
+                _SessionCard(
+                  summary: item,
+                  onSaveSuggestion: _saveSuggestedMemory,
+                ),
             ],
           ],
         ),
@@ -114,9 +163,14 @@ class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
 }
 
 class _SessionCard extends StatelessWidget {
-  const _SessionCard({required this.summary});
+  const _SessionCard({
+    required this.summary,
+    required this.onSaveSuggestion,
+  });
 
   final SessionSummary summary;
+  final Future<void> Function({required String category, required String note})
+      onSaveSuggestion;
 
   @override
   Widget build(BuildContext context) {
@@ -167,6 +221,40 @@ class _SessionCard extends StatelessWidget {
               icon: Icons.health_and_safety,
               label: 'Safety Note',
               text: summary.safetyNote,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (summary.triggersAudio != '-')
+                  OutlinedButton.icon(
+                    onPressed: () => onSaveSuggestion(
+                      category: 'trigger',
+                      note: 'Audio trigger pattern: ${summary.triggersAudio}',
+                    ),
+                    icon: const Icon(Icons.hearing, size: 18),
+                    label: const Text('Save audio trigger'),
+                  ),
+                if (summary.triggersVisual != '-')
+                  OutlinedButton.icon(
+                    onPressed: () => onSaveSuggestion(
+                      category: 'trigger',
+                      note: 'Visual trigger pattern: ${summary.triggersVisual}',
+                    ),
+                    icon: const Icon(Icons.visibility, size: 18),
+                    label: const Text('Save visual trigger'),
+                  ),
+                if (summary.followUp != '-')
+                  OutlinedButton.icon(
+                    onPressed: () => onSaveSuggestion(
+                      category: 'routine',
+                      note: 'Follow-up guidance: ${summary.followUp}',
+                    ),
+                    icon: const Icon(Icons.lightbulb, size: 18),
+                    label: const Text('Save follow-up'),
+                  ),
+              ],
             ),
           ],
         ),

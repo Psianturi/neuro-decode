@@ -226,13 +226,13 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(
-                  'Use the Support tab below whenever you need live help.',
-                  style: TextStyle(
-                    color: const Color(0xFF6EA1D5).withValues(alpha: 0.95),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                // Text(
+                //   'Use the Support tab below whenever you need live help.',
+                //   style: TextStyle(
+                //     color: const Color(0xFF6EA1D5).withValues(alpha: 0.95),
+                //     fontWeight: FontWeight.w600,
+                //   ),
+                // ),
               ],
             ),
           ),

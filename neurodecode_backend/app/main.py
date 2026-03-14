@@ -439,6 +439,9 @@ async def ws_live(websocket: WebSocket) -> None:
     user_id = (websocket.query_params.get("user_id") or "").strip() or None
     profile_id = (websocket.query_params.get("profile_id") or "").strip() or None
     effective_system_instruction = SYSTEM_INSTRUCTION
+    profile_memory_loaded = False
+    profile_memory_preview = ""
+    profile_memory_line_count = 0
 
     if settings.enable_profile_memory_context and user_id and profile_id:
         try:
@@ -454,6 +457,9 @@ async def ws_live(websocket: WebSocket) -> None:
                 print(
                     f"[profile_memory] Loaded for profile_id={profile_id} lines={len(memory_lines)} preview={preview[:240]}"
                 )
+                profile_memory_loaded = True
+                profile_memory_preview = preview[:240]
+                profile_memory_line_count = len(memory_lines)
                 effective_system_instruction = (
                     f"{SYSTEM_INSTRUCTION}\n\n{memory_context}"
                 )
@@ -532,6 +538,8 @@ async def ws_live(websocket: WebSocket) -> None:
                 "user_id": user_id,
                 "profile_id": profile_id,
                 "profile_memory_enabled": settings.enable_profile_memory_context,
+                "profile_memory_loaded": profile_memory_loaded,
+                "profile_memory_line_count": profile_memory_line_count,
             },
         )
 
@@ -544,7 +552,20 @@ async def ws_live(websocket: WebSocket) -> None:
                     "profile_id": profile_id,
                     "memory_item_limit": settings.profile_memory_item_limit,
                     "session_limit": settings.profile_memory_session_limit,
+                    "preview": profile_memory_preview,
                 },
+            )
+
+        if profile_memory_loaded and profile_id:
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "profile_memory_status",
+                        "loaded": True,
+                        "profile_id": profile_id,
+                        "line_count": profile_memory_line_count,
+                    }
+                )
             )
 
         def can_forward_visual_context() -> bool:

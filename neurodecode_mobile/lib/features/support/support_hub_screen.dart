@@ -21,7 +21,7 @@ class SupportHubScreen extends StatefulWidget {
 }
 
 class _SupportHubScreenState extends State<SupportHubScreen> {
-  bool _observerEnabled = false;
+  SupportSessionMode _sessionMode = SupportSessionMode.audioOnly;
   final SessionSummaryService _summaryService = SessionSummaryService();
   final AppIdentityStore _identityStore = AppIdentityStore();
   final TextEditingController _profileIdController = TextEditingController();
@@ -80,16 +80,43 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               color: NeuroColors.surface,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: SwitchListTile.adaptive(
-              value: _observerEnabled,
-              title: const Text('Camera Observer'),
-              subtitle:
-                  const Text('Send periodic frame for visual cue detection'),
-              onChanged: (value) {
-                setState(() {
-                  _observerEnabled = value;
-                });
-              },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Session Mode',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Use Audio only for caregiver consultation. Use Video + audio when the child is currently in distress and camera context is needed.',
+                    style: TextStyle(color: NeuroColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  SegmentedButton<SupportSessionMode>(
+                    segments: const [
+                      ButtonSegment<SupportSessionMode>(
+                        value: SupportSessionMode.audioOnly,
+                        icon: Icon(Icons.mic),
+                        label: Text('Audio only'),
+                      ),
+                      ButtonSegment<SupportSessionMode>(
+                        value: SupportSessionMode.videoAndAudio,
+                        icon: Icon(Icons.videocam),
+                        label: Text('Video + audio'),
+                      ),
+                    ],
+                    selected: <SupportSessionMode>{_sessionMode},
+                    onSelectionChanged: (selection) {
+                      setState(() {
+                        _sessionMode = selection.first;
+                      });
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 14),
@@ -164,7 +191,8 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                   MaterialPageRoute(
                     builder: (_) => LiveAgentScreen(
                       cameras: widget.cameras,
-                      observerEnabled: _observerEnabled,
+                      observerEnabled:
+                          _sessionMode == SupportSessionMode.videoAndAudio,
                       userId: userId,
                       profileId: profileId.isEmpty ? null : profileId,
                     ),
@@ -227,4 +255,9 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       ),
     );
   }
+}
+
+enum SupportSessionMode {
+  audioOnly,
+  videoAndAudio,
 }
