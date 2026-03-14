@@ -103,19 +103,43 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Profile ID',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  'Who is this support session for?',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Optional for local testing. Fill this with a real child or caregiver profile ID when you want personalized memory retrieval.',
+                  'Use one profile ID for one child or household context. Buddy will use it to remember helpful notes, recurring triggers, and past support patterns.',
                   style: TextStyle(color: NeuroColors.textSecondary),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: NeuroColors.surfaceVariant,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Why this matters',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'A profile makes later sessions feel more informed. Example notes: what usually triggers distress, what calming words help, and what a caregiver should avoid saying.',
+                        style: TextStyle(color: NeuroColors.textSecondary),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _profileIdController,
                   decoration: const InputDecoration(
-                    hintText: 'example: demo-child-001',
+                    labelText: 'Profile ID',
+                    hintText: 'Example: joy1 or home-evening-profile',
                     border: OutlineInputBorder(),
                   ),
                   textInputAction: TextInputAction.done,
@@ -179,7 +203,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                 );
               },
               icon: const Icon(Icons.psychology_alt_outlined),
-              label: const Text('OPEN PROFILE MEMORY'),
+              label: const Text('SET UP PROFILE WORKSPACE'),
             ),
           ),
           const SizedBox(height: 12),

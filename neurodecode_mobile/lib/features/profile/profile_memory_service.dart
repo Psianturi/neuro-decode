@@ -93,6 +93,42 @@ class ProfileMemoryItem {
   }
 }
 
+class ProfileMemoryContext {
+  const ProfileMemoryContext({
+    required this.profileFound,
+    required this.memoryItemCount,
+    required this.recentSessionCount,
+    required this.context,
+  });
+
+  final bool profileFound;
+  final int memoryItemCount;
+  final int recentSessionCount;
+  final String context;
+
+  factory ProfileMemoryContext.fromJson(Map<String, dynamic> json) {
+    int parseInt(dynamic value) {
+      if (value is int) {
+        return value;
+      }
+      if (value is num) {
+        return value.toInt();
+      }
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    final profileFoundValue = json['profile_found'];
+    return ProfileMemoryContext(
+      profileFound: profileFoundValue is bool
+          ? profileFoundValue
+          : profileFoundValue?.toString().toLowerCase() == 'true',
+      memoryItemCount: parseInt(json['memory_item_count']),
+      recentSessionCount: parseInt(json['recent_session_count']),
+      context: (json['context'] ?? '').toString().trim(),
+    );
+  }
+}
+
 class ProfileMemoryService {
   ProfileMemoryService({AppIdentityStore? identityStore})
       : _identityStore = identityStore ?? AppIdentityStore();
@@ -218,5 +254,13 @@ class ProfileMemoryService {
         'active': true,
       },
     );
+  }
+
+  Future<ProfileMemoryContext> fetchMemoryContext(String profileId) async {
+    final decoded = await _sendJson(
+      method: 'GET',
+      uri: await _buildUri('/profiles/$profileId/memory-context'),
+    );
+    return ProfileMemoryContext.fromJson(decoded);
   }
 }

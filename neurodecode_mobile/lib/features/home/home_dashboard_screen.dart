@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../config/app_identity_store.dart';
 import 'history_insights_screen.dart';
 import '../profile/profile_memory_screen.dart';
+import '../profile/profile_memory_service.dart';
 import 'session_summary_service.dart';
 import '../../theme/app_theme.dart';
 
@@ -25,8 +26,12 @@ class HomeDashboardScreen extends StatefulWidget {
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final SessionSummaryService _summaryService = SessionSummaryService();
   final AppIdentityStore _identityStore = AppIdentityStore();
+  final ProfileMemoryService _profileService = ProfileMemoryService();
   SessionSummary? _latestSummary;
+  ProfileRecord? _activeProfile;
+  ProfileMemoryContext? _profileContext;
   bool _isLoadingSummary = false;
+  bool _isLoadingProfile = false;
   String? _activeProfileId;
 
   @override
@@ -44,6 +49,46 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     setState(() {
       _activeProfileId = profileId;
     });
+    if (profileId != null && profileId.isNotEmpty) {
+      await _refreshProfileSummary();
+    }
+  }
+
+  Future<void> _refreshProfileSummary() async {
+    final profileId = _activeProfileId;
+    if (profileId == null || profileId.isEmpty || _isLoadingProfile) {
+      return;
+    }
+    setState(() {
+      _isLoadingProfile = true;
+    });
+    try {
+      final results = await Future.wait<Object?>([
+        _profileService.fetchProfile(profileId),
+        _profileService.fetchMemoryContext(profileId),
+      ]);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeProfile = results[0] as ProfileRecord?;
+        _profileContext = results[1] as ProfileMemoryContext;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeProfile = null;
+        _profileContext = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingProfile = false;
+        });
+      }
+    }
   }
 
   Future<void> _refreshLatestSummary() async {
@@ -134,6 +179,27 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 24),
+              _ProfileSummaryCard(
+                profileId: _activeProfileId,
+                profile: _activeProfile,
+                contextSummary: _profileContext,
+                isLoading: _isLoadingProfile,
+                onOpen: _activeProfileId == null || _activeProfileId!.isEmpty
+                    ? null
+                    : () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ProfileMemoryScreen(
+                              profileId: _activeProfileId!,
+                            ),
+                          ),
+                        );
+                        await _refreshProfileSummary();
+                      },
+                onGoSupport: widget.onGoSupport,
+              ),
+              const SizedBox(height: 12),
               _LatestSessionCard(
                 summary: _latestSummary,
                 isLoading: _isLoadingSummary,
@@ -300,6 +366,143 @@ class _LatestSessionCard extends StatelessWidget {
     } catch (_) {
       return raw;
     }
+  }
+}
+
+class _ProfileSummaryCard extends StatelessWidget {
+  const _ProfileSummaryCard({
+    required this.profileId,
+    required this.profile,
+    required this.contextSummary,
+    required this.isLoading,
+    required this.onOpen,
+    required this.onGoSupport,
+  });
+
+  final String? profileId;
+  final ProfileRecord? profile;
+  final ProfileMemoryContext? contextSummary;
+  final bool isLoading;
+  final VoidCallback? onOpen;
+  final VoidCallback onGoSupport;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasProfile = profileId != null && profileId!.isNotEmpty;
+    final title = profile?.name.isNotEmpty == true
+        ? profile!.name
+        : hasProfile
+            ? profileId!
+            : 'No support profile selected';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: NeuroColors.surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.badge_outlined, color: NeuroColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Active Profile Summary',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              if (isLoading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(title, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 6),
+          if (!hasProfile)
+            const Text(
+              'Set a profile in Support to help Buddy remember who is being supported and what usually helps.',
+              style: TextStyle(color: NeuroColors.textSecondary),
+            )
+          else ...[
+            Text(
+              profile?.notes.isNotEmpty == true
+                  ? profile!.notes
+                  : 'Profile is active. Add a short support summary and a few memory notes to make later sessions more personalized.',
+              style: const TextStyle(color: NeuroColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _ProfileChip(
+                  label: 'Memory notes',
+                  value: '${contextSummary?.memoryItemCount ?? 0}',
+                ),
+                _ProfileChip(
+                  label: 'Recent sessions',
+                  value: '${contextSummary?.recentSessionCount ?? 0}',
+                ),
+                if (profile?.childName.isNotEmpty == true)
+                  _ProfileChip(label: 'Child', value: profile!.childName),
+                if (profile?.caregiverName.isNotEmpty == true)
+                  _ProfileChip(
+                    label: 'Caregiver',
+                    value: profile!.caregiverName,
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 46,
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: hasProfile ? onOpen : onGoSupport,
+              icon: const Icon(Icons.psychology_alt_outlined),
+              label: Text(
+                hasProfile
+                    ? 'OPEN PROFILE WORKSPACE'
+                    : 'SET PROFILE IN SUPPORT',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileChip extends StatelessWidget {
+  const _ProfileChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: NeuroColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        '$label: $value',
+        style: const TextStyle(
+          color: NeuroColors.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 }
 
