@@ -239,6 +239,58 @@ def _is_meaningful_summary_value(text: str) -> bool:
     return not any(marker in normalized for marker in weak_markers)
 
 
+def _severity_rank(value: str) -> int:
+    normalized = value.strip().lower()
+    if normalized == "action_required":
+        return 3
+    if normalized == "warning":
+        return 2
+    return 1
+
+
+def _severity_for_repeated_trigger(count: int) -> str:
+    if count >= 3:
+        return "action_required"
+    if count >= 2:
+        return "warning"
+    return "info"
+
+
+def _build_rule_notification(
+    *,
+    now: str,
+    user_id: str,
+    profile_id: str | None,
+    session_id: str,
+    rule_id: str,
+    severity: str,
+    title: str,
+    message: str,
+    recommended_action: str | None = None,
+    fallback_action: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "user_id": user_id,
+        "profile_id": profile_id,
+        "rule_id": rule_id,
+        "severity": severity,
+        "title": title,
+        "message": message,
+        "status": "unread",
+        "created_at_utc": now,
+        "updated_at_utc": now,
+        "source_session_ids": [session_id],
+    }
+    if recommended_action:
+        payload["recommended_action"] = recommended_action
+    if fallback_action:
+        payload["fallback_action"] = fallback_action
+    if metadata:
+        payload["metadata"] = dict(metadata)
+    return payload
+
+
 async def _build_rule_notifications(
     *,
     session_id: str,
@@ -256,49 +308,80 @@ async def _build_rule_notifications(
     follow_up = structured.get("FOLLOW_UP", "").strip()
     if _is_meaningful_summary_value(follow_up):
         out.append(
-            {
-                "user_id": user_id,
-                "profile_id": profile_id,
-                "rule_id": "session_follow_up",
-                "severity": "info",
-                "title": "Review follow-up guidance",
-                "message": follow_up,
-                "status": "unread",
-                "created_at_utc": now,
-                "updated_at_utc": now,
-                "source_session_ids": [session_id],
-                "metadata": {
+            _build_rule_notification(
+                now=now,
+                user_id=user_id,
+                profile_id=profile_id,
+                session_id=session_id,
+                rule_id="session_follow_up",
+                severity="info",
+                title="Review follow-up guidance",
+                message=follow_up,
+                recommended_action="Apply one follow-up step in the next similar situation.",
+                fallback_action="If unsure, keep language brief and lower sensory input first.",
+                metadata={
                     "duration_minutes": duration_minutes,
                 },
-            }
+            )
         )
 
     if profile_id:
         recent = await session_store.list_recent(3, user_id=user_id, profile_id=profile_id)
         strong_audio_count = 0
+        strong_visual_count = 0
         for item in recent:
             structured_item = item.get("structured") if isinstance(item.get("structured"), dict) else {}
             audio_text = str(structured_item.get("triggers_audio") or "").strip()
             if _is_meaningful_summary_value(audio_text):
                 strong_audio_count += 1
+            visual_text = str(structured_item.get("triggers_visual") or "").strip()
+            if _is_meaningful_summary_value(visual_text):
+                strong_visual_count += 1
 
         if strong_audio_count >= 2:
+            severity = _severity_for_repeated_trigger(strong_audio_count)
             out.append(
-                {
-                    "user_id": user_id,
-                    "profile_id": profile_id,
-                    "rule_id": "repeated_audio_trigger",
-                    "severity": "warning",
-                    "title": "Repeated audio distress pattern",
-                    "message": "Audio distress patterns appeared in recent sessions. Consider reducing noise and preparing a calm fallback routine.",
-                    "status": "unread",
-                    "created_at_utc": now,
-                    "updated_at_utc": now,
-                    "source_session_ids": [session_id],
-                    "metadata": {
+                _build_rule_notification(
+                    now=now,
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    session_id=session_id,
+                    rule_id="repeated_audio_trigger",
+                    severity=severity,
+                    title="Repeated audio distress pattern",
+                    message=(
+                        "Audio distress patterns appeared in recent sessions. "
+                        "Prepare a low-noise routine before known sensitive windows."
+                    ),
+                    recommended_action="Lower environmental noise 5-10 minutes before expected trigger time.",
+                    fallback_action="Move to a quieter room and use a short calming cue.",
+                    metadata={
                         "recent_strong_audio_count": strong_audio_count,
                     },
-                }
+                )
+            )
+
+        if strong_visual_count >= 2:
+            severity = _severity_for_repeated_trigger(strong_visual_count)
+            out.append(
+                _build_rule_notification(
+                    now=now,
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    session_id=session_id,
+                    rule_id="repeated_visual_trigger",
+                    severity=severity,
+                    title="Repeated visual overload signal",
+                    message=(
+                        "Visual overload signals appeared in recent sessions. "
+                        "Reduce visual clutter and simplify transitions around trigger periods."
+                    ),
+                    recommended_action="Dim lights and reduce moving visual stimuli before escalation window.",
+                    fallback_action="Pause current activity and switch to one familiar calming routine.",
+                    metadata={
+                        "recent_strong_visual_count": strong_visual_count,
+                    },
+                )
             )
 
         profile = await profile_store.get_profile(profile_id, user_id=user_id)
@@ -307,20 +390,27 @@ async def _build_rule_notifications(
             caregiver_name = str(profile.get("caregiver_name") or "").strip()
             if not child_name or not caregiver_name:
                 out.append(
-                    {
-                        "user_id": user_id,
-                        "profile_id": profile_id,
-                        "rule_id": "profile_incomplete",
-                        "severity": "info",
-                        "title": "Complete profile essentials",
-                        "message": "Add child and caregiver names in Profile Workspace so support guidance stays more consistent.",
-                        "status": "unread",
-                        "created_at_utc": now,
-                        "updated_at_utc": now,
-                        "source_session_ids": [session_id],
-                    }
+                    _build_rule_notification(
+                        now=now,
+                        user_id=user_id,
+                        profile_id=profile_id,
+                        session_id=session_id,
+                        rule_id="profile_incomplete",
+                        severity="action_required",
+                        title="Complete profile essentials",
+                        message="Add child and caregiver names in Profile Workspace so support guidance stays more consistent.",
+                        recommended_action="Open Profile Workspace and complete child/caregiver identity fields.",
+                        fallback_action="At minimum, set child name to improve personalized prompts.",
+                    )
                 )
 
+    out.sort(
+        key=lambda item: (
+            _severity_rank(str(item.get("severity") or "info")),
+            str(item.get("updated_at_utc") or ""),
+        ),
+        reverse=True,
+    )
     return out[:3]
 
 
