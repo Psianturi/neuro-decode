@@ -228,15 +228,18 @@ class GeminiLiveSession:
                     f"{_summarize_live_message(msg)}"
                 )
 
-            # Audio chunks (SDK convenience field)
-            data = getattr(msg, "data", None)
-            if isinstance(data, (bytes, bytearray)) and data:
-                yield LiveOut(
-                    type="model_audio",
-                    data=bytes(data),
-                    mime_type="audio/pcm;rate=24000",
-                )
+            # Some Live SDK messages expose audio twice in the same frame:
+            # - msg.data (convenience field)
+            # - server_content.model_turn.parts[].inline_data
+            # Prefer inline_data when available to avoid duplicated playback.
+            direct_data = getattr(msg, "data", None)
+            direct_audio = (
+                bytes(direct_data)
+                if isinstance(direct_data, (bytes, bytearray)) and direct_data
+                else None
+            )
 
+            emitted_inline_audio = False
             server_content = getattr(msg, "server_content", None)
             if server_content:
                 if getattr(server_content, "interrupted", False) is True:
@@ -259,6 +262,7 @@ class GeminiLiveSession:
                         inline_data = getattr(part, "inline_data", None)
                         chunk = getattr(inline_data, "data", None) if inline_data else None
                         if isinstance(chunk, (bytes, bytearray)) and chunk:
+                            emitted_inline_audio = True
                             yield LiveOut(
                                 type="model_audio",
                                 data=bytes(chunk),
@@ -273,5 +277,12 @@ class GeminiLiveSession:
                             text = getattr(part, "text", None)
                             if isinstance(text, str) and text.strip():
                                 yield LiveOut(type="model_text", text=text)
+
+            if direct_audio and not emitted_inline_audio:
+                yield LiveOut(
+                    type="model_audio",
+                    data=direct_audio,
+                    mime_type="audio/pcm;rate=24000",
+                )
 
             await asyncio.sleep(0)
