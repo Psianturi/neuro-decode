@@ -72,6 +72,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   Timer? _audioFlushTimer;
   Timer? _playerIdleTimer;
   int _playerSampleRate = _geminiOutputSampleRate;
+  DateTime? _nativePcmRecoverUntil;
+  DateTime? _lastNativeRecoverNoticeAt;
   CameraController? _cameraController;
   Timer? _visionTimer;
   bool _isCapturingFrame = false;
@@ -766,39 +768,44 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   }
 
   Future<void> _feedNativeAndroidPcm(Uint8List pcm) async {
-    var attempts = 0;
-    while (attempts < 2) {
-      try {
-        if (!_isPlayerStreamOpen) {
-          await _nativeAudioChannel.invokeMethod<void>('initPlayer', {
-            'sampleRate': _playerSampleRate,
-            'channelCount': _geminiOutputChannels,
-            'bufferBytes': _playerBufferSize,
-          });
-          _isPlayerStreamOpen = true;
-          _logDebug(
-            'player_event',
-            'Native PCM stream opened at ${_playerSampleRate}Hz (channels: $_geminiOutputChannels)',
-          );
-        }
+    final now = DateTime.now();
+    if (_nativePcmRecoverUntil != null &&
+        now.isBefore(_nativePcmRecoverUntil!)) {
+      return;
+    }
 
-        await _nativeAudioChannel.invokeMethod<void>('writePcm', {
-          'bytes': pcm,
+    try {
+      if (!_isPlayerStreamOpen) {
+        await _nativeAudioChannel.invokeMethod<void>('initPlayer', {
+          'sampleRate': _playerSampleRate,
+          'channelCount': _geminiOutputChannels,
+          'bufferBytes': _playerBufferSize,
         });
-        return;
-      } on PlatformException catch (e) {
-        attempts += 1;
-        _isPlayerStreamOpen = false;
-        _logDebug('player_event',
-            'Native PCM error (attempt $attempts): ${e.message}');
-        try {
-          await _nativeAudioChannel.invokeMethod<void>('releasePlayer');
-        } catch (_) {}
-        if (attempts >= 2) {
-          _addLog(
-              'System', 'Audio output is recovering. Please wait a moment.');
-          return;
-        }
+        _isPlayerStreamOpen = true;
+        _logDebug(
+          'player_event',
+          'Native PCM stream opened at ${_playerSampleRate}Hz (channels: $_geminiOutputChannels)',
+        );
+      }
+
+      await _nativeAudioChannel.invokeMethod<void>('writePcm', {
+        'bytes': pcm,
+      });
+      _nativePcmRecoverUntil = null;
+      return;
+    } on PlatformException catch (e) {
+      _isPlayerStreamOpen = false;
+      _nativePcmRecoverUntil = now.add(const Duration(milliseconds: 900));
+      _logDebug('player_event', 'Native PCM error: ${e.message}');
+      try {
+        await _nativeAudioChannel.invokeMethod<void>('flushPlayer');
+      } catch (_) {}
+
+      if (_lastNativeRecoverNoticeAt == null ||
+          now.difference(_lastNativeRecoverNoticeAt!) >
+              const Duration(seconds: 10)) {
+        _lastNativeRecoverNoticeAt = now;
+        _addLog('System', 'Audio output is recovering. Please wait a moment.');
       }
     }
   }
@@ -1021,6 +1028,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _profileMemoryProfileId = null;
     _profileMemoryLineCount = 0;
     _profileMemoryCues = const <String>[];
+    _nativePcmRecoverUntil = null;
+    _lastNativeRecoverNoticeAt = null;
 
     if (mounted) {
       if (!_backendFatalError) {
