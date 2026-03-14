@@ -28,6 +28,7 @@ class Settings:
     firestore_event_collection: str
     firestore_profile_collection: str
     firestore_profile_memory_collection: str
+    firestore_notification_collection: str
     firestore_project: str | None
 
 
@@ -85,6 +86,9 @@ def get_settings() -> Settings:
     firestore_profile_memory_collection = os.getenv(
         "NEURODECODE_FIRESTORE_PROFILE_MEMORY_COLLECTION", "profile_memory"
     )
+    firestore_notification_collection = os.getenv(
+        "NEURODECODE_FIRESTORE_NOTIFICATION_COLLECTION", "notification_items"
+    )
     firestore_project = os.getenv("NEURODECODE_FIRESTORE_PROJECT") or None
 
     return Settings(
@@ -106,5 +110,6 @@ def get_settings() -> Settings:
         firestore_event_collection=firestore_event_collection,
         firestore_profile_collection=firestore_profile_collection,
         firestore_profile_memory_collection=firestore_profile_memory_collection,
+        firestore_notification_collection=firestore_notification_collection,
         firestore_project=firestore_project,
     )

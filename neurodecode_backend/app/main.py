@@ -17,6 +17,7 @@ from google import genai
 from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
 from app.memory_context import build_private_memory_context
+from app.notification_store import NotificationStore
 from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.session_store import SessionStore
@@ -219,6 +220,110 @@ async def _store_session_events(records: list[dict[str, object]]) -> None:
     await session_store.store_events(records)
 
 
+async def _store_notifications(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    return await notification_store.add_many(records)
+
+
+def _is_meaningful_summary_value(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    weak_markers = (
+        "no strong",
+        "no visual trigger",
+        "no audio trigger",
+        "no trigger",
+        "not detected",
+        "-",
+    )
+    return not any(marker in normalized for marker in weak_markers)
+
+
+async def _build_rule_notifications(
+    *,
+    session_id: str,
+    user_id: str | None,
+    profile_id: str | None,
+    structured: dict[str, str],
+    duration_minutes: int,
+) -> list[dict[str, object]]:
+    if not user_id:
+        return []
+
+    now = datetime.now(timezone.utc).isoformat()
+    out: list[dict[str, object]] = []
+
+    follow_up = structured.get("FOLLOW_UP", "").strip()
+    if _is_meaningful_summary_value(follow_up):
+        out.append(
+            {
+                "user_id": user_id,
+                "profile_id": profile_id,
+                "rule_id": "session_follow_up",
+                "severity": "info",
+                "title": "Review follow-up guidance",
+                "message": follow_up,
+                "status": "unread",
+                "created_at_utc": now,
+                "updated_at_utc": now,
+                "source_session_ids": [session_id],
+                "metadata": {
+                    "duration_minutes": duration_minutes,
+                },
+            }
+        )
+
+    if profile_id:
+        recent = await session_store.list_recent(3, user_id=user_id, profile_id=profile_id)
+        strong_audio_count = 0
+        for item in recent:
+            structured_item = item.get("structured") if isinstance(item.get("structured"), dict) else {}
+            audio_text = str(structured_item.get("triggers_audio") or "").strip()
+            if _is_meaningful_summary_value(audio_text):
+                strong_audio_count += 1
+
+        if strong_audio_count >= 2:
+            out.append(
+                {
+                    "user_id": user_id,
+                    "profile_id": profile_id,
+                    "rule_id": "repeated_audio_trigger",
+                    "severity": "warning",
+                    "title": "Repeated audio distress pattern",
+                    "message": "Audio distress patterns appeared in recent sessions. Consider reducing noise and preparing a calm fallback routine.",
+                    "status": "unread",
+                    "created_at_utc": now,
+                    "updated_at_utc": now,
+                    "source_session_ids": [session_id],
+                    "metadata": {
+                        "recent_strong_audio_count": strong_audio_count,
+                    },
+                }
+            )
+
+        profile = await profile_store.get_profile(profile_id, user_id=user_id)
+        if profile is not None:
+            child_name = str(profile.get("child_name") or "").strip()
+            caregiver_name = str(profile.get("caregiver_name") or "").strip()
+            if not child_name or not caregiver_name:
+                out.append(
+                    {
+                        "user_id": user_id,
+                        "profile_id": profile_id,
+                        "rule_id": "profile_incomplete",
+                        "severity": "info",
+                        "title": "Complete profile essentials",
+                        "message": "Add child and caregiver names in Profile Workspace so support guidance stays more consistent.",
+                        "status": "unread",
+                        "created_at_utc": now,
+                        "updated_at_utc": now,
+                        "source_session_ids": [session_id],
+                    }
+                )
+
+    return out[:3]
+
+
 async def _get_latest_session_summary(
     *,
     user_id: str | None = None,
@@ -268,6 +373,11 @@ profile_store = ProfileStore(
     firestore_enabled=_startup_settings.firestore_enabled,
     profile_collection=_startup_settings.firestore_profile_collection,
     profile_memory_collection=_startup_settings.firestore_profile_memory_collection,
+    firestore_project=_startup_settings.firestore_project,
+)
+notification_store = NotificationStore(
+    firestore_enabled=_startup_settings.firestore_enabled,
+    notification_collection=_startup_settings.firestore_notification_collection,
     firestore_project=_startup_settings.firestore_project,
 )
 
@@ -342,6 +452,46 @@ async def sessions_list(
         "status": "ok",
         "count": len(items),
         "sessions": items,
+    }
+
+
+@app.get("/notifications")
+async def notifications_list(
+    user_id: str | None = None,
+    profile_id: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+) -> dict[str, object]:
+    safe_limit = max(1, min(limit, 100))
+    safe_status = status.strip().lower() if isinstance(status, str) and status.strip() else None
+    items = await notification_store.list_recent(
+        safe_limit,
+        user_id=user_id,
+        profile_id=profile_id,
+        status=safe_status,
+    )
+    return {
+        "status": "ok",
+        "count": len(items),
+        "items": items,
+    }
+
+
+@app.post("/notifications/{notification_id}/read")
+async def notifications_mark_read(
+    notification_id: str,
+    user_id: str | None = None,
+) -> dict[str, object]:
+    updated = await notification_store.mark_read(notification_id, user_id=user_id)
+    if not updated:
+        return {
+            "status": "empty",
+            "message": "Notification not found",
+            "notification_id": notification_id,
+        }
+    return {
+        "status": "ok",
+        "notification_id": notification_id,
     }
 
 
@@ -683,6 +833,20 @@ async def ws_live(websocket: WebSocket) -> None:
                     },
                 }
             )
+
+            try:
+                notifications = await _build_rule_notifications(
+                    session_id=session_id,
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    structured=structured,
+                    duration_minutes=duration_minutes,
+                )
+                if notifications:
+                    stored = await _store_notifications(notifications)
+                    print(f"[notifications] Created {len(stored)} item(s) from rules")
+            except Exception as e:
+                print(f"[notifications] Rule generation failed: {e}")
 
             if settings.telegram_bot_token and settings.telegram_chat_id:
                 message = _format_telegram_message(

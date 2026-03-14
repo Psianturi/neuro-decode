@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 
 import '../../config/app_identity_store.dart';
 import 'history_insights_screen.dart';
+import 'notification_service.dart';
+import 'notifications_center_screen.dart';
 import '../profile/profile_memory_screen.dart';
 import '../profile/profile_memory_service.dart';
 import 'session_summary_service.dart';
@@ -25,20 +27,24 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final SessionSummaryService _summaryService = SessionSummaryService();
+  final NotificationService _notificationService = NotificationService();
   final AppIdentityStore _identityStore = AppIdentityStore();
   final ProfileMemoryService _profileService = ProfileMemoryService();
   SessionSummary? _latestSummary;
   ProfileRecord? _activeProfile;
   ProfileMemoryContext? _profileContext;
   bool _isLoadingSummary = false;
+  bool _isLoadingNotifications = false;
   bool _isLoadingProfile = false;
   bool _isCheckingProfileId = false;
   String? _activeProfileId;
+  int _unreadNotificationCount = 0;
 
   @override
   void initState() {
     super.initState();
     _refreshLatestSummary();
+    _refreshUnreadNotifications();
     _loadActiveProfileId();
   }
 
@@ -153,6 +159,39 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
+  Future<void> _refreshUnreadNotifications() async {
+    if (_isLoadingNotifications) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingNotifications = true;
+    });
+
+    try {
+      final unread = await _notificationService.fetchAll(status: 'unread');
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _unreadNotificationCount = unread.length;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _unreadNotificationCount = 0;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingNotifications = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     _scheduleProfileIdSync();
@@ -234,6 +273,53 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 summary: _latestSummary,
                 isLoading: _isLoadingSummary,
                 onRefresh: _refreshLatestSummary,
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => NotificationsCenterScreen(
+                          service: _notificationService,
+                        ),
+                      ),
+                    );
+                    await _refreshUnreadNotifications();
+                  },
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(Icons.notifications_none),
+                      if (_unreadNotificationCount > 0)
+                        Positioned(
+                          right: -7,
+                          top: -6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade500,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              _unreadNotificationCount > 99
+                                  ? '99+'
+                                  : '$_unreadNotificationCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  label: const Text('VIEW NOTIFICATIONS'),
+                ),
               ),
               const SizedBox(height: 12),
               SizedBox(
