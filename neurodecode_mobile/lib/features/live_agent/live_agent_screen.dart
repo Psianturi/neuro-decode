@@ -63,17 +63,21 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       FlutterSoundPlayer(logLevel: Level.warning);
   final bool _preferNativeAndroidPcm =
       defaultTargetPlatform == TargetPlatform.android;
+  bool _useNativeAndroidPcm = defaultTargetPlatform == TargetPlatform.android;
+  bool _isFlutterPlayerOpened = false;
   bool _isPlayerReady = false;
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
-  static const int _playerBufferSize = 12285;
+  static const int _playerBufferSize = 12288;
   final BytesBuilder _pendingPcmBuffer = BytesBuilder(copy: false);
   Timer? _audioFlushTimer;
   Timer? _playerIdleTimer;
   int _playerSampleRate = _geminiOutputSampleRate;
   DateTime? _nativePcmRecoverUntil;
   DateTime? _lastNativeRecoverNoticeAt;
+  int _nativePcmErrorCount = 0;
+  bool _nativeRecoverNoticeShown = false;
   CameraController? _cameraController;
   Timer? _visionTimer;
   bool _isCapturingFrame = false;
@@ -117,6 +121,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     await _soundPlayer.openPlayer();
     _isPlayerReady = true;
     _logDebug('player_event', 'FlutterSoundPlayer opened');
+  }
+
+  Future<void> _ensureFlutterPlayerOpened() async {
+    if (_isFlutterPlayerOpened) return;
+    await _soundPlayer.openPlayer();
+    _isFlutterPlayerOpened = true;
+    _logDebug('player_event', 'FlutterSoundPlayer opened (fallback mode)');
   }
 
   Future<void> _checkPermissions() async {
@@ -746,10 +757,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   Future<void> _doFeedAudio(Uint8List pcm) async {
     if (!_isPlayerReady) return;
     _cancelPlayerIdleClose();
-    if (_preferNativeAndroidPcm) {
-      await _feedNativeAndroidPcm(pcm);
-      return;
+    if (_useNativeAndroidPcm) {
+      final wroteToNative = await _feedNativeAndroidPcm(pcm);
+      if (wroteToNative || _preferNativeAndroidPcm) {
+        return;
+      }
     }
+    await _ensureFlutterPlayerOpened();
     if (!_isPlayerStreamOpen) {
       await _soundPlayer.startPlayerFromStream(
         codec: Codec.pcm16,
@@ -767,11 +781,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     await _soundPlayer.feedUint8FromStream(pcm);
   }
 
-  Future<void> _feedNativeAndroidPcm(Uint8List pcm) async {
+  Future<bool> _feedNativeAndroidPcm(Uint8List pcm) async {
     final now = DateTime.now();
     if (_nativePcmRecoverUntil != null &&
         now.isBefore(_nativePcmRecoverUntil!)) {
-      return;
+      return false;
     }
 
     try {
@@ -792,21 +806,36 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         'bytes': pcm,
       });
       _nativePcmRecoverUntil = null;
-      return;
+      _nativePcmErrorCount = 0;
+      return true;
     } on PlatformException catch (e) {
       _isPlayerStreamOpen = false;
       _nativePcmRecoverUntil = now.add(const Duration(milliseconds: 900));
-      _logDebug('player_event', 'Native PCM error: ${e.message}');
+      _nativePcmErrorCount += 1;
+      _logDebug(
+        'player_event',
+        'Native PCM error #$_nativePcmErrorCount: code=${e.code} message=${e.message}',
+      );
       try {
         await _nativeAudioChannel.invokeMethod<void>('flushPlayer');
       } catch (_) {}
 
-      if (_lastNativeRecoverNoticeAt == null ||
-          now.difference(_lastNativeRecoverNoticeAt!) >
-              const Duration(seconds: 10)) {
+      if (!_nativeRecoverNoticeShown &&
+          (_lastNativeRecoverNoticeAt == null ||
+              now.difference(_lastNativeRecoverNoticeAt!) >
+                  const Duration(seconds: 30))) {
         _lastNativeRecoverNoticeAt = now;
+        _nativeRecoverNoticeShown = true;
         _addLog('System', 'Audio output is recovering. Please wait a moment.');
       }
+      try {
+        await _nativeAudioChannel.invokeMethod<void>('releasePlayer');
+      } catch (_) {}
+      // Keep Android on native path and retry with a clean AudioTrack state.
+      if (_nativePcmErrorCount >= 2) {
+        _logDebug('player_event', 'Native recovery: forcing player re-init');
+      }
+      return false;
     }
   }
 
@@ -814,7 +843,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _cancelPlayerIdleClose();
     _flushPendingAudio();
     if (_isPlayerStreamOpen) {
-      if (_preferNativeAndroidPcm) {
+      if (_useNativeAndroidPcm) {
         _logDebug(
             'player_event', 'native PCM player kept alive across idle turn');
         return;
@@ -831,7 +860,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _cancelPlayerIdleClose();
     _clearPendingAudio();
     if (_isPlayerStreamOpen) {
-      if (_preferNativeAndroidPcm) {
+      if (_useNativeAndroidPcm) {
         _nativeAudioChannel.invokeMethod<void>('flushPlayer');
         _feedChain = null;
         _logDebug('player_event', 'native PCM queue flushed');
@@ -846,6 +875,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
   void _logDebug(String tag, String msg) {
     final ts = DateFormat('HH:mm:ss').format(DateTime.now());
+    if (_isCleaningUp) {
+      _debugLog.add('[$ts] $tag: $msg');
+      if (_debugLog.length > 200) {
+        _debugLog.removeRange(0, _debugLog.length - 200);
+      }
+      return;
+    }
     // Skip setState for high-frequency audio tags to avoid UI thread contention
     if (tag == 'audio_patch') {
       _debugLog.add('[$ts] $tag: $msg');
@@ -1030,6 +1066,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _profileMemoryCues = const <String>[];
     _nativePcmRecoverUntil = null;
     _lastNativeRecoverNoticeAt = null;
+    _nativePcmErrorCount = 0;
+    _nativeRecoverNoticeShown = false;
+    _useNativeAndroidPcm = _preferNativeAndroidPcm;
 
     if (mounted) {
       if (!_backendFatalError) {
@@ -1057,7 +1096,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _playerIdleTimer?.cancel();
     if (_preferNativeAndroidPcm) {
       _nativeAudioChannel.invokeMethod<void>('releasePlayer');
-    } else {
+    }
+    if (_isFlutterPlayerOpened) {
       _soundPlayer.closePlayer();
     }
     _scrollController.dispose();
@@ -1251,17 +1291,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 icon: const Icon(Icons.psychology_alt_outlined),
                 tooltip: 'View memory cues',
               ),
-            if (widget.observerEnabled)
-              IconButton(
-                onPressed: _openObserverPanel,
-                icon: const Icon(Icons.insights),
-                tooltip: 'Observer Panel',
-              ),
-            IconButton(
-              onPressed: _openDebugLog,
-              icon: const Icon(Icons.bug_report),
-              tooltip: 'Debug Log',
-            ),
+            // if (widget.observerEnabled)
+            //   IconButton(
+            //     onPressed: _openObserverPanel,
+            //     icon: const Icon(Icons.insights),
+            //     tooltip: 'Observer Panel',
+            //   ),
           ],
         ),
         body: Stack(
