@@ -46,7 +46,7 @@ class AppIdentityStore {
     return raw
         .map((item) => item.trim())
         .where((item) => item.isNotEmpty)
-        .toList(growable: false);
+        .toList();
   }
 
   Future<void> removeRecentProfileId(String profileId) async {

@@ -442,6 +442,7 @@ async def ws_live(websocket: WebSocket) -> None:
     profile_memory_loaded = False
     profile_memory_preview = ""
     profile_memory_line_count = 0
+    profile_memory_cues: list[str] = []
 
     if settings.enable_profile_memory_context and user_id and profile_id:
         try:
@@ -454,6 +455,22 @@ async def ws_live(websocket: WebSocket) -> None:
             if memory_context:
                 memory_lines = [line.strip() for line in memory_context.splitlines() if line.strip()]
                 preview = " | ".join(memory_lines[1:3]) if len(memory_lines) > 1 else memory_lines[0]
+
+                for line in memory_lines:
+                    normalized = line.lstrip("- ").strip()
+                    if normalized.lower().startswith("child:"):
+                        profile_memory_cues.append(normalized)
+                    elif normalized.lower().startswith("caregiver:"):
+                        profile_memory_cues.append(normalized)
+                    elif normalized.lower().startswith("profile notes:"):
+                        profile_memory_cues.append(normalized)
+                    elif normalized.lower().startswith("known audio triggers:"):
+                        profile_memory_cues.append(normalized)
+                    elif normalized.lower().startswith("known visual triggers:"):
+                        profile_memory_cues.append(normalized)
+                    if len(profile_memory_cues) >= 3:
+                        break
+
                 print(
                     f"[profile_memory] Loaded for profile_id={profile_id} lines={len(memory_lines)} preview={preview[:240]}"
                 )
@@ -564,6 +581,7 @@ async def ws_live(websocket: WebSocket) -> None:
                         "loaded": True,
                         "profile_id": profile_id,
                         "line_count": profile_memory_line_count,
+                        "cues": profile_memory_cues,
                     }
                 )
             )

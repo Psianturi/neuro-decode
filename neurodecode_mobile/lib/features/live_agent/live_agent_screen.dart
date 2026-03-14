@@ -390,7 +390,17 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         final loaded = (data['loaded'] ?? false) == true;
         if (loaded) {
           final profileId = (data['profile_id'] ?? '').toString();
-          final lineCount = (data['line_count'] ?? 0) as int;
+          final lineCountRaw = data['line_count'];
+          final lineCount = lineCountRaw is int
+              ? lineCountRaw
+              : int.tryParse((lineCountRaw ?? '0').toString()) ?? 0;
+          final cuesRaw = data['cues'];
+          final cues = cuesRaw is List
+              ? cuesRaw
+                  .map((item) => item.toString().trim())
+                  .where((item) => item.isNotEmpty)
+                  .toList()
+              : <String>[];
           if (mounted) {
             setState(() {
               _profileMemoryLoaded = true;
@@ -401,6 +411,12 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
             'System',
             'Profile memory active for $profileId ($lineCount context lines).',
           );
+          if (cues.isNotEmpty) {
+            _addLog(
+              'System',
+              'Memory cues: ${cues.join(' | ')}',
+            );
+          }
         }
         return;
       }
