@@ -81,6 +81,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _backendFatalError = false;
   bool _profileMemoryLoaded = false;
   int _profileMemoryLineCount = 0;
+  bool _cameraPreviewPaused = false;
+  Offset _cameraPreviewOffset = const Offset(0, 0);
   int _currentTurnAudioBytes = 0;
   DateTime? _currentTurnStartedAt;
 
@@ -147,6 +149,16 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     }
   }
 
+  Future<void> _retryCameraInit() async {
+    _stopVisionLoop();
+    final old = _cameraController;
+    _cameraController = null;
+    await old?.dispose();
+    if (!mounted) return;
+    setState(() {});
+    await _initCamera();
+  }
+
   bool get _isConnected =>
       _channel != null && _wsSub != null && _state != AgentState.error;
 
@@ -154,7 +166,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       _isConnected &&
       !_isMicActive &&
       _state != AgentState.thinking &&
-      _state != AgentState.speaking;
+      _state != AgentState.speaking &&
+      !_cameraPreviewPaused;
 
   void _setStateLabel(AgentState next) {
     if (_state == next) return;
@@ -1230,18 +1243,59 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 _cameraController != null &&
                 _cameraController!.value.isInitialized)
               Positioned(
-                top: 20,
-                right: 16,
-                child: Container(
-                  width: 120,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: NeuroColors.primary, width: 2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: CameraPreview(_cameraController!),
+                top: 20 + _cameraPreviewOffset.dy,
+                right: 16 - _cameraPreviewOffset.dx,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _cameraPreviewPaused = !_cameraPreviewPaused;
+                    });
+                  },
+                  onPanUpdate: (details) {
+                    setState(() {
+                      _cameraPreviewOffset += details.delta;
+                    });
+                  },
+                  child: Container(
+                    width: 120,
+                    height: 160,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: NeuroColors.primary, width: 2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_cameraPreviewPaused)
+                            Image.asset('assets/mascot02.png',
+                                fit: BoxFit.cover)
+                          else
+                            CameraPreview(_cameraController!),
+                          Positioned(
+                            right: 6,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                _cameraPreviewPaused ? 'Paused' : 'Live Cam',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -1253,19 +1307,51 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 right: 16,
                 child: Container(
                   width: 120,
-                  height: 160,
+                  height: 182,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: NeuroColors.surface,
                     border: Border.all(color: NeuroColors.primary, width: 2),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: ClipRRect(
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(
+                            'assets/mascot02.png',
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _retryCameraInit,
+                          child: const Text('Retry'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (widget.observerEnabled && _cameraController != null)
+              Positioned(
+                top: 186,
+                right: 16,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: NeuroColors.surface.withValues(alpha: 0.92),
                     borderRadius: BorderRadius.circular(10),
-                    child: Image.asset(
-                      'assets/mascot02.png',
-                      fit: BoxFit.cover,
-                    ),
+                    border: Border.all(color: NeuroColors.primary),
+                  ),
+                  child: const Text(
+                    'Tap: pause/resume • Drag: move',
+                    style: TextStyle(fontSize: 10),
                   ),
                 ),
               ),

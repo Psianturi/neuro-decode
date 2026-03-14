@@ -6,6 +6,7 @@ import '../../theme/app_theme.dart';
 import '../home/history_insights_screen.dart';
 import '../home/session_summary_service.dart';
 import '../live_agent/live_agent_screen.dart';
+import '../profile/profile_picker_screen.dart';
 import '../profile/profile_memory_screen.dart';
 
 class SupportHubScreen extends StatefulWidget {
@@ -171,6 +172,29 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                   ),
                   textInputAction: TextInputAction.done,
                   autocorrect: false,
+                ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final selected = await Navigator.push<String>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ProfilePickerScreen(
+                              identityStore: _identityStore),
+                        ),
+                      );
+                      if (!mounted || selected == null || selected.isEmpty) {
+                        return;
+                      }
+                      setState(() {
+                        _profileIdController.text = selected;
+                      });
+                    },
+                    icon: const Icon(Icons.history),
+                    label: const Text('SELECT SAVED PROFILE ID'),
+                  ),
                 ),
               ],
             ),
