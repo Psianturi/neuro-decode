@@ -44,10 +44,10 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   static const int _geminiOutputChannels = 1;
   static const int _maxPlaybackChunkBytes = 5760;
   static const int _audioFlushThresholdBytes =
-      5760; // ~120 ms @24kHz mono PCM16
+      11520; // ~240 ms @24kHz mono PCM16
   static const int _audioPrebufferBytes = 11520; // ~240 ms @24kHz mono PCM16
   static const int _audioDropFrameBytes = 48000; // ~1 second @24kHz mono PCM16
-  static const Duration _audioFlushInterval = Duration(milliseconds: 45);
+  static const Duration _audioFlushInterval = Duration(milliseconds: 30);
   static const int _minTurnAudioBytes = 8000;
   static const Duration _minTurnDuration = Duration(milliseconds: 350);
   static const Duration _playerIdleCloseDelay = Duration(seconds: 8);
@@ -68,7 +68,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   bool _isPlayerStreamOpen = false;
   bool _geminiTurnComplete = true;
   Future<void>? _feedChain;
-  static const int _playerBufferSize = 8192;
+  static const int _playerBufferSize = 12285;
   final BytesBuilder _pendingPcmBuffer = BytesBuilder(copy: false);
   Timer? _audioFlushTimer;
   Timer? _playerIdleTimer;
@@ -137,6 +137,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
         enableAudio: false,
       );
       await controller.initialize();
+      await controller.setFlashMode(FlashMode.off);
       if (!mounted) {
         await controller.dispose();
         return;

@@ -25,6 +25,10 @@ class MainActivity : FlutterActivity() {
 	private var currentSampleRate: Int? = null
 	private var currentChannelCount: Int? = null
 	private var currentBufferBytes: Int? = null
+	private val isKnownAudioQuirkDevice: Boolean by lazy {
+		val maker = Build.MANUFACTURER?.lowercase() ?: ""
+		maker.contains("infinix") || maker.contains("tecno") || maker.contains("transsion")
+	}
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
@@ -129,7 +133,7 @@ class MainActivity : FlutterActivity() {
 			.setTransferMode(AudioTrack.MODE_STREAM)
 			.setBufferSizeInBytes(bufferBytes)
 
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isKnownAudioQuirkDevice) {
 			trackBuilder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
 		}
 
@@ -159,10 +163,24 @@ class MainActivity : FlutterActivity() {
 				try {
 					val chunk = pcmQueue.pollFirst(250, TimeUnit.MILLISECONDS) ?: continue
 					val track = audioTrack ?: continue
-					val written = track.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+					var offset = 0
+					var writtenTotal = 0
+					while (offset < chunk.size) {
+						val written = track.write(
+							chunk,
+							offset,
+							chunk.size - offset,
+							AudioTrack.WRITE_BLOCKING,
+						)
+						if (written <= 0) {
+							break
+						}
+						offset += written
+						writtenTotal += written
+					}
 					Log.d(
 						logTag,
-						"AudioTrack write requested=${chunk.size} written=$written queueDepth=${pcmQueue.size} playState=${track.playState}",
+						"AudioTrack write requested=${chunk.size} written=$writtenTotal queueDepth=${pcmQueue.size} playState=${track.playState}",
 					)
 				} catch (_: InterruptedException) {
 					Thread.currentThread().interrupt()
