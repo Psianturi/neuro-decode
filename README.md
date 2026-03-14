@@ -175,16 +175,38 @@ These are tracked and expected in current phase:
 2. Camera preview may fail to initialize on certain OEM/driver combinations (retry fallback exists).
 3. Notification system is still rule-foundation stage, not yet fully autonomous.
 
-## Planning Docs
+## Release Regression Checklist
 
-1. [docs/next_steps_roadmap.md](docs/next_steps_roadmap.md)
-2. [docs/firestore_schema_plan.md](docs/firestore_schema_plan.md)
+Run this checklist before each release/deploy that touches live session, prompt, or audio path.
 
-## Next Priority (Demo-Oriented)
+1. Audio-only single turn
+    - Push-to-talk once (>1 second).
+    - Expect: transcript appears and AI audio response plays clearly.
+2. Audio-only multi-turn
+    - Send at least 3 turns in one session.
+    - Expect: no duplicated opening audio, no robotic slowdown, state transitions stay normal.
+3. Video observer on
+    - Start `Video + audio` mode.
+    - Pause/resume and drag observer preview.
+    - Expect: camera controls work, live response still stable.
+4. Session summary persistence
+    - End session normally.
+    - Expect: summary record saved and visible via `/sessions/latest`.
+5. History / Insights rendering
+    - Open History screen in app.
+    - Expect: latest summary fields load and render correctly.
+6. Profile memory context handshake
+    - Start live with valid Profile ID.
+    - Expect: `profile_memory_status` appears and memory cues are shown when available.
+7. Proactive notifications baseline
+    - After eligible session data, open notifications center.
+    - Expect: unread/read behavior works and references correct session/profile.
 
-1. Proof of memory influence in live response (`Profile ID` context clearly reflected in Gemini guidance).
-2. Suggested memory UX refinement and dedupe behavior.
-3. Rule-based proactive follow-up items as notification foundation.
+Suggested status format per item: `PASS`, `FAIL`, `N/A`.
+
+
+
+
 
 ## Data / Model References
 
