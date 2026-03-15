@@ -35,6 +35,9 @@ class Settings:
     admin_debug_token: str | None
     admin_debug_max_items: int
 
+    fcm_enabled: bool
+    firestore_push_device_collection: str
+
 
 def get_settings() -> Settings:
     # The Google GenAI SDK will auto-pick `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
@@ -104,6 +107,15 @@ def get_settings() -> Settings:
         min(int(os.getenv("NEURODECODE_ADMIN_DEBUG_MAX_ITEMS", "300")), 2000),
     )
 
+    fcm_enabled = os.getenv("NEURODECODE_FCM_ENABLED", "0").strip() not in {
+        "0",
+        "false",
+        "False",
+    }
+    firestore_push_device_collection = os.getenv(
+        "NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION", "push_device_tokens"
+    )
+
     return Settings(
         gemini_api_key=gemini_api_key,
         live_model=live_model,
@@ -128,4 +140,6 @@ def get_settings() -> Settings:
         admin_debug_enabled=admin_debug_enabled,
         admin_debug_token=admin_debug_token,
         admin_debug_max_items=admin_debug_max_items,
+        fcm_enabled=fcm_enabled,
+        firestore_push_device_collection=firestore_push_device_collection,
     )

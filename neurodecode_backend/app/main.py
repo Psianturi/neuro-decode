@@ -18,6 +18,8 @@ from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
 from app.memory_context import build_private_memory_context
 from app.notification_store import NotificationStore
+from app.push_device_store import PushDeviceStore
+from app.push_sender import PushSender
 from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.rule_debug_store import RuleDebugStore
@@ -223,6 +225,63 @@ async def _store_session_events(records: list[dict[str, object]]) -> None:
 
 async def _store_notifications(records: list[dict[str, object]]) -> list[dict[str, object]]:
     return await notification_store.add_many(records)
+
+
+def _pick_top_notification(records: list[dict[str, object]]) -> dict[str, object] | None:
+    if not records:
+        return None
+    sorted_records = sorted(
+        records,
+        key=lambda item: (
+            _severity_rank(str(item.get("severity") or "info")),
+            str(item.get("updated_at_utc") or ""),
+        ),
+        reverse=True,
+    )
+    return sorted_records[0]
+
+
+async def _deliver_push_for_notifications(
+    *,
+    user_id: str | None,
+    profile_id: str | None,
+    records: list[dict[str, object]],
+) -> int:
+    if not _startup_settings.fcm_enabled:
+        return 0
+    if not user_id:
+        return 0
+
+    top = _pick_top_notification(records)
+    if top is None:
+        return 0
+
+    tokens = await push_device_store.list_active_tokens(
+        user_id=user_id,
+        profile_id=profile_id,
+    )
+    if not tokens:
+        return 0
+
+    title = str(top.get("title") or "NeuroDecode update").strip() or "NeuroDecode update"
+    body = str(top.get("message") or "Review latest support guidance.").strip()
+    severity = str(top.get("severity") or "info").strip().lower() or "info"
+    rule_id = str(top.get("rule_id") or "").strip()
+    notification_id = str(top.get("notification_id") or "").strip()
+
+    sent = await push_sender.send_to_tokens(
+        tokens=tokens,
+        title=title,
+        body=body,
+        data={
+            "type": "proactive_rule",
+            "severity": severity,
+            "rule_id": rule_id,
+            "profile_id": profile_id or "",
+            "notification_id": notification_id,
+        },
+    )
+    return sent
 
 
 def _is_meaningful_summary_value(text: str) -> bool:
@@ -595,6 +654,12 @@ notification_store = NotificationStore(
     firestore_project=_startup_settings.firestore_project,
 )
 rule_debug_store = RuleDebugStore(max_items=_startup_settings.admin_debug_max_items)
+push_device_store = PushDeviceStore(
+    firestore_enabled=_startup_settings.firestore_enabled,
+    device_collection=_startup_settings.firestore_push_device_collection,
+    firestore_project=_startup_settings.firestore_project,
+)
+push_sender = PushSender(enabled=_startup_settings.fcm_enabled)
 
 
 def _format_telegram_message(*, duration_seconds: int, summary_text: str) -> str:
@@ -707,6 +772,41 @@ async def notifications_mark_read(
     return {
         "status": "ok",
         "notification_id": notification_id,
+    }
+
+
+@app.post("/devices/push-token")
+async def register_push_token(
+    payload: dict[str, object],
+    user_id: str | None = None,
+    profile_id: str | None = None,
+) -> dict[str, object]:
+    if not user_id:
+        return {
+            "status": "error",
+            "message": "user_id is required",
+        }
+
+    token = str(payload.get("token") or "").strip()
+    if not token:
+        return {
+            "status": "error",
+            "message": "token is required",
+        }
+
+    platform = str(payload.get("platform") or "").strip() or None
+    app_version = str(payload.get("app_version") or "").strip() or None
+
+    item = await push_device_store.register(
+        user_id=user_id,
+        token=token,
+        profile_id=profile_id,
+        platform=platform,
+        app_version=app_version,
+    )
+    return {
+        "status": "ok",
+        "item": item,
     }
 
 
@@ -1094,6 +1194,13 @@ async def ws_live(websocket: WebSocket) -> None:
                 if notifications:
                     stored = await _store_notifications(notifications)
                     print(f"[notifications] Created {len(stored)} item(s) from rules")
+                    sent = await _deliver_push_for_notifications(
+                        user_id=user_id,
+                        profile_id=profile_id,
+                        records=stored,
+                    )
+                    if sent > 0:
+                        print(f"[push] Sent proactive push to {sent} device(s)")
             except Exception as e:
                 print(f"[notifications] Rule generation failed: {e}")
 
