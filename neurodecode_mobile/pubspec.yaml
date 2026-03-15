@@ -56,6 +56,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -71,6 +72,14 @@ flutter:
   assets:
     - assets/mascot01.png
     - assets/mascot02.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path_android: assets/mascot01.png
+  adaptive_icon_foreground: assets/mascot01.png
+  adaptive_icon_background: "#FFF6FA"
+  min_sdk_android: 21
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
