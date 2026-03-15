@@ -39,6 +39,13 @@ class PushDeviceStore:
     def _device_key(self, *, user_id: str, token: str) -> str:
         return f"{user_id}:{token}"
 
+    @staticmethod
+    def _mask_token(token: str) -> str:
+        value = token.strip()
+        if len(value) <= 12:
+            return "*" * len(value)
+        return f"{value[:6]}...{value[-6:]}"
+
     async def _remember(self, *, user_id: str, token: str, record: dict[str, object]) -> None:
         async with self._lock:
             self._memory[self._device_key(user_id=user_id, token=token)] = dict(record)
@@ -137,3 +144,53 @@ class PushDeviceStore:
             seen.add(token)
             tokens.append(token)
         return tokens
+
+    async def list_active_devices(
+        self,
+        *,
+        user_id: str,
+        profile_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        safe_limit = max(1, min(limit, 200))
+        items: list[dict[str, object]] = []
+
+        if self._firestore_enabled:
+            try:
+                items = await asyncio.to_thread(
+                    self._list_firestore,
+                    user_id=user_id,
+                    profile_id=profile_id,
+                )
+            except Exception as e:
+                print(f"[push_device_store] Firestore read failed; using memory fallback: {e}")
+
+        if not items:
+            async with self._lock:
+                values = list(self._memory.values())
+            for row in values:
+                if str(row.get("user_id") or "") != user_id:
+                    continue
+                if profile_id and str(row.get("profile_id") or "") != profile_id:
+                    continue
+                if row.get("active") is not True:
+                    continue
+                items.append(dict(row))
+
+        out: list[dict[str, object]] = []
+        for item in items[:safe_limit]:
+            token = str(item.get("token") or "").strip()
+            out.append(
+                {
+                    "user_id": str(item.get("user_id") or ""),
+                    "profile_id": str(item.get("profile_id") or ""),
+                    "platform": str(item.get("platform") or "unknown"),
+                    "app_version": str(item.get("app_version") or ""),
+                    "active": bool(item.get("active") is True),
+                    "updated_at_utc": str(item.get("updated_at_utc") or ""),
+                    "registered_at_utc": str(item.get("registered_at_utc") or ""),
+                    "token_masked": self._mask_token(token),
+                    "token_length": len(token),
+                }
+            )
+        return out

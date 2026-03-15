@@ -128,6 +128,9 @@ Key HTTP endpoints:
 5. `GET /profiles/{profile_id}/memory`
 6. `POST /profiles/{profile_id}/memory`
 7. `GET /profiles/{profile_id}/memory-context`
+8. `POST /devices/push-token`
+9. `GET /admin/rules/debug` (admin token required)
+10. `GET /admin/push/devices` (admin token required)
 
 WebSocket:
 
@@ -177,6 +180,43 @@ FCM push (optional, feature-flagged):
 
 1. `NEURODECODE_FCM_ENABLED`
 2. `NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION`
+
+## Secure Rollout (Cloud Run)
+
+Use this sequence for safe activation without exposing secrets in git.
+
+1. Keep all new flags `OFF` by default in production.
+2. Store sensitive values in Secret Manager (do not hardcode in repo or `cloudbuild.yaml`).
+3. Enable admin debug first, verify output, then enable FCM.
+
+Suggested Secret Manager names:
+
+1. `neurodecode-gemini-api-key`
+2. `neurodecode-admin-debug-token`
+
+Example Cloud Run update (replace project/region/service as needed):
+
+```powershell
+gcloud run services update neurodecode-backend `
+    --region asia-southeast1 `
+    --set-secrets GEMINI_API_KEY=neurodecode-gemini-api-key:latest `
+    --set-secrets NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest `
+    --update-env-vars NEURODECODE_ADMIN_DEBUG_ENABLED=1,NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=500,NEURODECODE_FCM_ENABLED=0,NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION=push_device_tokens
+```
+
+Admin debug endpoint usage (read-only):
+
+```text
+GET /admin/rules/debug?admin_token=<TOKEN>&profile_id=<PROFILE_ID>&limit=20
+GET /admin/push/devices?admin_token=<TOKEN>&user_id=<USER_ID>&profile_id=<PROFILE_ID>&limit=20
+```
+
+FCM activation checklist (after admin debug is healthy):
+
+1. Device registers token via `POST /devices/push-token`.
+2. Backend receives proactive notifications as usual.
+3. Turn on `NEURODECODE_FCM_ENABLED=1`.
+4. Verify push send count in Cloud Run logs (`[push] Sent proactive push ...`).
 
 ## Known Current Gaps
 

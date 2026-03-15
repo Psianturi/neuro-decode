@@ -844,6 +844,42 @@ async def admin_rules_debug(
     }
 
 
+@app.get("/admin/push/devices")
+async def admin_push_devices(
+    admin_token: str | None = None,
+    user_id: str | None = None,
+    profile_id: str | None = None,
+    limit: int = 50,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not _is_admin_authorized(
+        admin_token_query=admin_token,
+        admin_token_header=x_admin_token,
+    ):
+        return {
+            "status": "forbidden",
+            "message": "Admin debug endpoint is disabled or token is invalid.",
+        }
+
+    if not user_id:
+        return {
+            "status": "error",
+            "message": "user_id is required",
+        }
+
+    safe_limit = max(1, min(limit, 100))
+    items = await push_device_store.list_active_devices(
+        user_id=user_id,
+        profile_id=profile_id,
+        limit=safe_limit,
+    )
+    return {
+        "status": "ok",
+        "count": len(items),
+        "items": items,
+    }
+
+
 @app.get("/profiles/{profile_id}")
 async def profile_get(profile_id: str, user_id: str | None = None) -> dict[str, object]:
     profile = await profile_store.get_profile(profile_id, user_id=user_id)
