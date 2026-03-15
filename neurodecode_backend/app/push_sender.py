@@ -36,19 +36,59 @@ class PushSender:
             print(f"[push_sender] init failed: {e}")
             return False
 
-    def _send(self, *, tokens: list[str], title: str, body: str, data: dict[str, str]) -> int:
-        if not self._ensure_initialized():
-            return 0
+    def _send(
+        self,
+        *,
+        tokens: list[str],
+        title: str,
+        body: str,
+        data: dict[str, str],
+    ) -> dict[str, object]:
         if not tokens:
-            return 0
+            return {
+                "enabled": self._enabled,
+                "initialized": self._initialized,
+                "attempted": 0,
+                "success_count": 0,
+                "failure_count": 0,
+                "error": None,
+            }
 
-        message = messaging.MulticastMessage(
-            tokens=tokens,
-            notification=messaging.Notification(title=title, body=body),
-            data=data,
-        )
-        result = messaging.send_each_for_multicast(message)
-        return int(result.success_count)
+        initialized = self._ensure_initialized()
+        if not initialized:
+            return {
+                "enabled": self._enabled,
+                "initialized": False,
+                "attempted": len(tokens),
+                "success_count": 0,
+                "failure_count": len(tokens),
+                "error": "push_sender_not_initialized",
+            }
+
+        try:
+            message = messaging.MulticastMessage(
+                tokens=tokens,
+                notification=messaging.Notification(title=title, body=body),
+                data=data,
+            )
+            result = messaging.send_each_for_multicast(message)
+            return {
+                "enabled": self._enabled,
+                "initialized": True,
+                "attempted": len(tokens),
+                "success_count": int(result.success_count),
+                "failure_count": int(result.failure_count),
+                "error": None,
+            }
+        except Exception as e:
+            return {
+                "enabled": self._enabled,
+                "initialized": True,
+                "attempted": len(tokens),
+                "success_count": 0,
+                "failure_count": len(tokens),
+                "error": str(e),
+            }
 
     async def send_to_tokens(
         self,
@@ -57,7 +97,7 @@ class PushSender:
         title: str,
         body: str,
         data: dict[str, str],
-    ) -> int:
+    ) -> dict[str, object]:
         return await asyncio.to_thread(
             self._send,
             tokens=list(tokens),

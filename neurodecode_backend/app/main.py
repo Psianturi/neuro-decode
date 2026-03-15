@@ -269,7 +269,7 @@ async def _deliver_push_for_notifications(
     rule_id = str(top.get("rule_id") or "").strip()
     notification_id = str(top.get("notification_id") or "").strip()
 
-    sent = await push_sender.send_to_tokens(
+    result = await push_sender.send_to_tokens(
         tokens=tokens,
         title=title,
         body=body,
@@ -281,7 +281,14 @@ async def _deliver_push_for_notifications(
             "notification_id": notification_id,
         },
     )
-    return sent
+    success_count = int(result.get("success_count") or 0)
+    failure_count = int(result.get("failure_count") or 0)
+    error = str(result.get("error") or "").strip()
+    if error:
+        print(f"[push] delivery error: {error}")
+    if failure_count > 0:
+        print(f"[push] delivery failures={failure_count}")
+    return success_count
 
 
 def _is_meaningful_summary_value(text: str) -> bool:
@@ -953,9 +960,12 @@ async def admin_push_test(
 
     return {
         "status": "ok",
-        "fcm_enabled": _startup_settings.fcm_enabled,
-        "target_device_count": len(tokens),
-        "sent_count": sent,
+        "fcm_enabled": bool(push.get("enabled")),
+        "fcm_initialized": bool(push.get("initialized")),
+        "target_device_count": int(push.get("attempted") or len(tokens)),
+        "sent_count": int(push.get("success_count") or 0),
+        "failure_count": int(push.get("failure_count") or 0),
+        "error": push.get("error"),
     }
 
 
