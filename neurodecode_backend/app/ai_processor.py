@@ -50,7 +50,30 @@ class NeuroDecodeAI:
         threading.Thread(target=self._lazy_load_models, daemon=True).start()
 
     @staticmethod
-    def _load_keras_model(model_path: str) -> Any:
+    def _validate_local_model_path(model_path: str, models_dir: str) -> str:
+        real_models_dir = os.path.realpath(models_dir)
+        real_model_path = os.path.realpath(model_path)
+
+        # Prevent path traversal / unexpected file loading.
+        if not real_model_path.startswith(real_models_dir + os.sep):
+            raise ValueError("Model path must stay inside app/models")
+
+        # This service only expects native Keras v3 model files.
+        if not real_model_path.lower().endswith(".keras"):
+            raise ValueError("Only .keras model files are allowed")
+
+        if not os.path.exists(real_model_path):
+            raise FileNotFoundError(real_model_path)
+
+        # Defensive limit to reduce accidental oversized/corrupted model loads.
+        max_bytes = 256 * 1024 * 1024
+        if os.path.getsize(real_model_path) > max_bytes:
+            raise ValueError("Model file is unexpectedly large")
+
+        return real_model_path
+
+    @staticmethod
+    def _load_keras_model(model_path: str, models_dir: str) -> Any:
         from keras import initializers
         from keras.models import load_model
 
@@ -60,10 +83,16 @@ class NeuroDecodeAI:
             "Zeros": initializers.Zeros,
         }
 
-        return load_model(
+        safe_model_path = NeuroDecodeAI._validate_local_model_path(
             model_path,
+            models_dir,
+        )
+
+        return load_model(
+            safe_model_path,
             compile=False,
             custom_objects=custom_objects,
+            safe_mode=True,
         )
 
     def _lazy_load_models(self) -> None:
@@ -85,14 +114,22 @@ class NeuroDecodeAI:
 
                 base_dir = os.path.dirname(os.path.abspath(__file__))
 
-                audio_path = os.path.join(base_dir, "models", "autism_audio_extractor.keras")
+                models_dir = os.path.join(base_dir, "models")
+
+                audio_path = os.path.join(models_dir, "autism_audio_extractor.keras")
                 if os.path.exists(audio_path):
-                    self._audio_extractor = self._load_keras_model(audio_path)
+                    self._audio_extractor = self._load_keras_model(
+                        audio_path,
+                        models_dir,
+                    )
                     print("[AI Engine] Loaded audio extractor")
 
-                video_path = os.path.join(base_dir, "models", "autism_behavior_extractor.keras")
+                video_path = os.path.join(models_dir, "autism_behavior_extractor.keras")
                 if os.path.exists(video_path):
-                    self._video_extractor = self._load_keras_model(video_path)
+                    self._video_extractor = self._load_keras_model(
+                        video_path,
+                        models_dir,
+                    )
                     # VGG16 produces dense visual features that match the Colab pipeline.
                     local_vgg16_weights = self._resolve_vgg16_weights_path(base_dir)
                     if local_vgg16_weights:
