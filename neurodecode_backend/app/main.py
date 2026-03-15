@@ -811,6 +811,9 @@ async def register_push_token(
         platform=platform,
         app_version=app_version,
     )
+    print(
+        f"[push] token registered user_id={user_id} profile_id={profile_id or ''} platform={platform or 'unknown'}"
+    )
     return {
         "status": "ok",
         "item": item,
