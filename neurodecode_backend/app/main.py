@@ -260,6 +260,11 @@ async def _deliver_push_for_notifications(
         user_id=user_id,
         profile_id=profile_id,
     )
+    if not tokens and profile_id:
+        tokens = await push_device_store.list_active_tokens(
+            user_id=user_id,
+            profile_id=None,
+        )
     if not tokens:
         return 0
 
@@ -811,8 +816,9 @@ async def register_push_token(
         platform=platform,
         app_version=app_version,
     )
+    token_tail = token[-8:] if len(token) >= 8 else token
     print(
-        f"[push] token registered user_id={user_id} profile_id={profile_id or ''} platform={platform or 'unknown'}"
+        f"[push] token registered user_id={user_id} profile_id={profile_id or ''} platform={platform or 'unknown'} token_tail={token_tail}"
     )
     return {
         "status": "ok",
@@ -954,6 +960,11 @@ async def admin_push_test(
         user_id=user_id,
         profile_id=profile_id,
     )
+    if not tokens and profile_id:
+        tokens = await push_device_store.list_active_tokens(
+            user_id=user_id,
+            profile_id=None,
+        )
     push_result = await push_sender.send_to_tokens(
         tokens=tokens,
         title=title,
