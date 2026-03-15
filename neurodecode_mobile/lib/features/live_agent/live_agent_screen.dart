@@ -1132,6 +1132,15 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   @override
   Widget build(BuildContext context) {
     final navigator = Navigator.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surfaceColor = colorScheme.surface;
+    final primaryColor = colorScheme.primary;
+    final secondaryColor = colorScheme.secondary;
+    final bodyMutedColor = colorScheme.onSurface.withValues(alpha: 0.72);
+    final bodyPrimaryColor = colorScheme.onSurface;
+
     return PopScope(
       canPop: !_isConnected,
       onPopInvokedWithResult: (didPop, _) async {
@@ -1162,67 +1171,63 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Live Session'),
-              Text(
-                _stateLabel,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _getStateColor(_state),
-                ),
-              ),
-              if (_profileMemoryLoaded)
-                Container(
-                  margin: const EdgeInsets.only(top: 2),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: NeuroColors.secondary.withValues(alpha: 0.95),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    'Memory Active${_profileMemoryProfileId != null ? ': ${_profileMemoryProfileId!}' : ''}',
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+              Row(
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isConnected
+                          ? _getStateColor(_state)
+                          : Colors.red,
                     ),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _isConnected ? _stateLabel : 'Offline',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _isConnected
+                          ? _getStateColor(_state)
+                          : Colors.red,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_profileMemoryLoaded) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                      color: secondaryColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(
+                            NeuroColors.radiusPill),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.psychology_alt,
+                              size: 12, color: secondaryColor),
+                          const SizedBox(width: 3),
+                          Text(
+                            _profileMemoryProfileId ?? 'Memory',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: secondaryColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
           ),
           actions: [
-            Container(
-              margin: const EdgeInsets.only(right: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _isConnected ? Colors.green : Colors.red,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _isConnected ? 'Live' : 'Offline',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (_profileMemoryLoaded)
-              Container(
-                margin: const EdgeInsets.only(right: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: NeuroColors.primary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  'Memory $_profileMemoryLineCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
             if (_profileMemoryLoaded && _profileMemoryCues.isNotEmpty)
               IconButton(
                 onPressed: () {
@@ -1244,12 +1249,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 icon: const Icon(Icons.psychology_alt_outlined),
                 tooltip: 'View memory cues',
               ),
-            // if (widget.observerEnabled)
-            //   IconButton(
-            //     onPressed: _openObserverPanel,
-            //     icon: const Icon(Icons.insights),
-            //     tooltip: 'Observer Panel',
-            //   ),
           ],
         ),
         body: Stack(
@@ -1265,10 +1264,29 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                       final entry = _transcriptLog[index];
                       final sender = entry['sender']!;
                       final text = entry['text']!;
+                      final trimmedText = text.trim();
                       final isGemini = sender == 'Gemini';
+                      final isUser = sender == 'You';
                       final isSystem = sender == 'System' || sender == 'Error';
-                      final isLight =
-                          Theme.of(context).brightness == Brightness.light;
+
+                      if (trimmedText.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+
+                      final bubbleColor = isSystem
+                          ? colorScheme.surface.withValues(alpha: isDark ? 0.45 : 0.72)
+                          : (isUser
+                              ? primaryColor.withValues(alpha: isDark ? 0.22 : 0.12)
+                              : surfaceColor);
+
+                      final bubbleBorder = Border.all(
+                        color: isSystem
+                            ? colorScheme.outline.withValues(alpha: 0.18)
+                            : (isGemini
+                                ? colorScheme.outline.withValues(alpha: 0.18)
+                                : primaryColor.withValues(alpha: 0.25)),
+                        width: 1,
+                      );
 
                       return Align(
                         alignment: isSystem
@@ -1276,28 +1294,84 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                             : (isGemini
                                 ? Alignment.centerLeft
                                 : Alignment.centerRight),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          decoration: BoxDecoration(
-                            color: isSystem
-                                ? Colors.transparent
-                                : (isGemini
-                                    ? NeuroColors.surfaceVariant
-                                    : NeuroColors.surface),
-                            borderRadius: BorderRadius.circular(12),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth:
+                                MediaQuery.of(context).size.width * 0.82,
                           ),
-                          child: Text(
-                            isSystem ? text : '$sender: $text',
-                            style: TextStyle(
-                              color: isSystem
-                                  ? Colors.grey
-                                  : (isLight
-                                      ? NeuroColors.textPrimary
-                                      : Colors.white),
-                              fontStyle: isSystem
-                                  ? FontStyle.italic
-                                  : FontStyle.normal,
+                          child: IntrinsicHeight(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (isGemini)
+                                  Container(
+                                    width: 3,
+                                    margin: const EdgeInsets.symmetric(vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: primaryColor,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                if (isGemini) const SizedBox(width: 4),
+                                Flexible(
+                                  child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            decoration: BoxDecoration(
+                              color: bubbleColor,
+                              borderRadius: BorderRadius.circular(
+                                  NeuroColors.radiusMd),
+                              border: bubbleBorder,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: isUser
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
+                              children: [
+                                if (!isSystem)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (isGemini) ...[
+                                          Icon(Icons.smart_toy,
+                                              size: 13,
+                                              color: primaryColor),
+                                          const SizedBox(width: 4),
+                                        ],
+                                        Text(
+                                          sender,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: isGemini
+                                                ? primaryColor
+                                                : secondaryColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                Text(
+                                  trimmedText,
+                                  style: TextStyle(
+                                    color: isSystem
+                                        ? bodyMutedColor
+                                        : bodyPrimaryColor,
+                                    fontStyle: isSystem
+                                        ? FontStyle.italic
+                                        : FontStyle.normal,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -1328,7 +1402,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     width: 120,
                     height: 160,
                     decoration: BoxDecoration(
-                      border: Border.all(color: NeuroColors.primary, width: 2),
+                      border: Border.all(color: primaryColor, width: 2),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: ClipRRect(
@@ -1378,8 +1452,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                   height: 182,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: NeuroColors.surface,
-                    border: Border.all(color: NeuroColors.primary, width: 2),
+                    color: surfaceColor,
+                    border: Border.all(color: primaryColor, width: 2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
@@ -1413,13 +1487,13 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   decoration: BoxDecoration(
-                    color: NeuroColors.surface.withValues(alpha: 0.92),
+                    color: surfaceColor.withValues(alpha: 0.92),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: NeuroColors.primary),
+                    border: Border.all(color: primaryColor),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Tap: pause/resume • Drag: move',
-                    style: TextStyle(fontSize: 10),
+                    style: textTheme.bodySmall?.copyWith(fontSize: 10),
                   ),
                 ),
               ),
@@ -1452,7 +1526,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                                     ? Colors.redAccent
                                     : (_state == AgentState.thinking
                                         ? Colors.purple
-                                        : NeuroColors.primary))),
+                                : primaryColor))),
                         shape: BoxShape.circle,
                         boxShadow: _isMicActive
                             ? [
@@ -1480,27 +1554,33 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    !_isConnected
-                        ? 'Not connected'
-                        : (_state == AgentState.speaking
-                            ? 'AI is speaking... wait to finish'
-                            : (_isMicActive
-                                ? 'Recording \u2022 Tap \u25A0 to send'
-                                : (_state == AgentState.thinking
-                                    ? 'AI is thinking... please wait'
-                                    : 'Tap mic to record, then tap \u25A0 to send'))),
-                    style: const TextStyle(
-                      color: NeuroColors.textSecondary,
-                      fontSize: 12,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      !_isConnected
+                          ? 'Not connected'
+                          : (_state == AgentState.speaking
+                              ? 'AI is speaking... wait to finish'
+                              : (_isMicActive
+                                  ? 'Recording \u2022 Tap \u25A0 to send'
+                                  : (_state == AgentState.thinking
+                                      ? 'AI is thinking... please wait'
+                                      : 'Tap mic to record, then tap \u25A0 to send'))),
+                      textAlign: TextAlign.center,
+                      style: textTheme.bodyMedium?.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
 
-                  SizedBox(
-                    width: 220,
-                    height: 48,
-                    child: ElevatedButton.icon(
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 56),
+                    child: SizedBox(
+                      height: 48,
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
                       onPressed: _state == AgentState.connecting
                           ? null
                           : (_isConnected
@@ -1523,13 +1603,14 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _isConnected
                             ? Colors.red.shade400
-                            : NeuroColors.primary,
+                            : primaryColor,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.circular(NeuroColors.radiusLg),
                         ),
                       ),
                     ),
+                  ),
                   ),
                 ],
               ),

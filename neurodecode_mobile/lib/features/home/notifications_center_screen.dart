@@ -123,26 +123,26 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(NeuroColors.spacingMd),
             decoration: BoxDecoration(
               color: NeuroColors.surface,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
             ),
             child: Row(
               children: [
                 const Icon(Icons.notifications_active_outlined,
                     color: NeuroColors.primary),
-                const SizedBox(width: 10),
+                const SizedBox(width: NeuroColors.spacingSm + 2),
                 Expanded(
                   child: Text(
                     'Unread notifications: $unreadCount',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: NeuroColors.spacingSm + 4),
           if (_isLoading && _items.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 56),
@@ -162,7 +162,7 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
           else
             for (final item in _items)
               Card(
-                margin: const EdgeInsets.only(bottom: 10),
+                margin: const EdgeInsets.only(bottom: NeuroColors.spacingSm + 2),
                 color: _severityBackground(item.severity),
                 child: ListTile(
                   leading: Icon(
@@ -272,10 +272,10 @@ class _InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(NeuroColors.spacingMd),
       decoration: BoxDecoration(
         color: NeuroColors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

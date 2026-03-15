@@ -457,10 +457,10 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                 const SizedBox(height: 14),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(NeuroColors.spacingMd - 2),
                   decoration: BoxDecoration(
                     color: NeuroColors.surfaceVariant,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(NeuroColors.radiusSm),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -681,10 +681,10 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(NeuroColors.spacingMd + 2),
       decoration: BoxDecoration(
         color: NeuroColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
       ),
       child: child,
     );

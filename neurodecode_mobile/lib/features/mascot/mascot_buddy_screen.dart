@@ -7,11 +7,15 @@ class MascotBuddyScreen extends StatefulWidget {
   const MascotBuddyScreen({
     super.key,
     required this.cameras,
+    required this.themeSelection,
+    required this.onThemeChanged,
     required this.onGoHome,
     required this.onGoSupport,
   });
 
   final List<CameraDescription> cameras;
+  final AppVisualTheme themeSelection;
+  final Future<void> Function(AppVisualTheme theme) onThemeChanged;
   final VoidCallback onGoHome;
   final VoidCallback onGoSupport;
 
@@ -28,6 +32,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
 
   String _selectedGuide = 'overview';
   int _phraseIndex = 0;
+  bool _isChangingTheme = false;
 
   static const List<String> _phrases = [
     'Hi! I am Neuro Buddy. Let us keep this moment calm and safe.',
@@ -72,6 +77,108 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
       ..reverse();
   }
 
+  Future<void> _handleThemeChange(AppVisualTheme nextTheme) async {
+    if (_isChangingTheme || widget.themeSelection == nextTheme) {
+      return;
+    }
+    setState(() {
+      _isChangingTheme = true;
+    });
+    try {
+      await widget.onThemeChanged(nextTheme);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isChangingTheme = false;
+        });
+      }
+    }
+  }
+
+  String get _themeLabel {
+    switch (widget.themeSelection) {
+      case AppVisualTheme.dark:
+        return 'Dark';
+      case AppVisualTheme.pink:
+        return 'Soft Pink';
+      case AppVisualTheme.light:
+        return 'Light';
+    }
+  }
+
+  Future<void> _openThemeMenu() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Theme Mood',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: NeuroColors.spacingSm),
+                Text(
+                  'Choose the look that feels the calmest for you.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: NeuroColors.spacingMd),
+                _ThemeMenuTile(
+                  title: 'Light',
+                  subtitle: 'Clean and airy',
+                  colors: const [
+                    NeuroColors.background,
+                    NeuroColors.primary,
+                    NeuroColors.secondary,
+                  ],
+                  selected: widget.themeSelection == AppVisualTheme.light,
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    await _handleThemeChange(AppVisualTheme.light);
+                  },
+                ),
+                _ThemeMenuTile(
+                  title: 'Dark',
+                  subtitle: 'Balanced and focused',
+                  colors: const [
+                    NeuroColors.darkBackground,
+                    NeuroColors.darkPrimary,
+                    NeuroColors.darkSecondary,
+                  ],
+                  selected: widget.themeSelection == AppVisualTheme.dark,
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    await _handleThemeChange(AppVisualTheme.dark);
+                  },
+                ),
+                _ThemeMenuTile(
+                  title: 'Soft Pink',
+                  subtitle: 'Warm and gentle',
+                  colors: const [
+                    NeuroColors.pinkBackground,
+                    NeuroColors.pinkPrimary,
+                    NeuroColors.pinkSecondary,
+                  ],
+                  selected: widget.themeSelection == AppVisualTheme.pink,
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    await _handleThemeChange(AppVisualTheme.pink);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   String get _guideTitle {
     switch (_selectedGuide) {
       case 'breathe':
@@ -98,11 +205,22 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
 
   @override
   Widget build(BuildContext context) {
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
     return Scaffold(
-      backgroundColor: NeuroColors.background,
+      backgroundColor: backgroundColor,
       appBar: AppBar(
         title: const Text('Meet Buddy!'),
-        backgroundColor: NeuroColors.background,
+        backgroundColor: backgroundColor,
+        actions: [
+          IconButton(
+            onPressed: _isChangingTheme ? null : _openThemeMenu,
+            tooltip: 'Theme mood',
+            icon: const Icon(Icons.tune),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -121,10 +239,10 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                 );
               },
               child: Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(NeuroColors.spacingMd),
                 decoration: BoxDecoration(
-                  color: NeuroColors.surface,
-                  borderRadius: BorderRadius.circular(18),
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
@@ -138,43 +256,39 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Tap Buddy to wave hello',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: NeuroColors.primary,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: NeuroColors.spacingMd - 2),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(NeuroColors.spacingMd),
             decoration: BoxDecoration(
-              color: NeuroColors.surface,
-              borderRadius: BorderRadius.circular(18),
+              color: surfaceColor,
+              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
             ),
             child: Column(
               children: [
-                const Text(
+                Text(
                   'Hi! I am Buddy',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.w700,
-                    color: NeuroColors.primary,
+                    color: primaryColor,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: NeuroColors.spacingSm),
                 Text(
                   _phrases[_phraseIndex],
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: NeuroColors.textSecondary,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     height: 1.5,
                     fontSize: 16,
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: NeuroColors.spacingMd - 2),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -203,34 +317,57 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: NeuroColors.spacingMd - 2),
           Container(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(NeuroColors.spacingMd + 2),
             decoration: BoxDecoration(
-              color: NeuroColors.surface,
-              borderRadius: BorderRadius.circular(18),
+              color: surfaceColor,
+              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+            ),
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.palette_outlined,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              title: Text(
+                'Theme Mood',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              subtitle: Text(
+                _themeLabel,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _isChangingTheme ? null : _openThemeMenu,
+            ),
+          ),
+          if (_isChangingTheme) ...[
+            const SizedBox(height: NeuroColors.spacingSm),
+            const LinearProgressIndicator(minHeight: 3),
+          ],
+          const SizedBox(height: NeuroColors.spacingMd - 2),
+          Container(
+            padding: const EdgeInsets.all(NeuroColors.spacingMd + 2),
+            decoration: BoxDecoration(
+              color: surfaceColor,
+              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   _guideTitle,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: NeuroColors.textPrimary,
-                  ),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 22),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: NeuroColors.spacingSm + 2),
                 Text(
                   _guideBody,
-                  style: const TextStyle(
-                    color: NeuroColors.textSecondary,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     height: 1.55,
-                    fontSize: 15,
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: NeuroColors.spacingMd - 2),
                 // Text(
                 //   'Use the Support tab below whenever you need live help.',
                 //   style: TextStyle(
@@ -260,17 +397,113 @@ class _BuddyActionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final selectedColor = Theme.of(context).colorScheme.primary;
+    final unselectedColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.10);
+
     return ActionChip(
       onPressed: onPressed,
       backgroundColor:
-          selected ? NeuroColors.primary : NeuroColors.surfaceVariant,
+          selected ? selectedColor : unselectedColor,
       side: BorderSide.none,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       label: Text(
         label,
         style: TextStyle(
-          color: selected ? Colors.white : NeuroColors.primary,
+          color: selected ? Colors.white : selectedColor,
           fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeMenuTile extends StatelessWidget {
+  const _ThemeMenuTile({
+    required this.title,
+    required this.subtitle,
+    required this.colors,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<Color> colors;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        margin: const EdgeInsets.only(bottom: NeuroColors.spacingSm),
+        padding: const EdgeInsets.all(NeuroColors.spacingSm + 4),
+        decoration: BoxDecoration(
+          color: selected
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+              : Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+          border: Border.all(
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.outline.withValues(alpha: 0.18),
+            width: selected ? 1.8 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Row(
+              children: colors
+                  .map(
+                    (color) => Container(
+                      width: 16,
+                      height: 16,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+            const SizedBox(width: NeuroColors.spacingMd),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: NeuroColors.spacingXs),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(
+                Icons.check_circle,
+                size: 20,
+                color: Theme.of(context).colorScheme.primary,
+              )
+            else
+              Icon(
+                Icons.radio_button_unchecked,
+                size: 20,
+                color: Theme.of(context)
+                    .colorScheme
+                    .outline
+                    .withValues(alpha: 0.45),
+              ),
+          ],
         ),
       ),
     );

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -249,6 +251,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget build(BuildContext context) {
     _scheduleProfileIdSync();
     _scheduleUnreadSync();
+    final secondaryColor = Theme.of(context).colorScheme.secondary;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('NeuroDecode AI'),
@@ -289,7 +293,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(NeuroColors.spacingLg),
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -297,48 +301,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Row(
                 children: [
                   const _ConnectionDot(),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: NeuroColors.spacingSm),
                   Text(
-                    'Cloud Run Connected',
-                    style: Theme.of(context).textTheme.titleSmall,
+                    'Online',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: secondaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: NeuroColors.surface,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
-                        child: Image.asset(
-                          'assets/mascot01.png',
-                          width: 118,
-                          height: 118,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Hello. Wishing you a calm day.',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Review the latest session, check insights, and open Live Support when you need real-time guidance.',
-                      style: TextStyle(color: NeuroColors.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: NeuroColors.spacingMd),
+              const _MascotCarousel(),
+              const SizedBox(height: NeuroColors.spacingLg),
               _ProfileSummaryCard(
                 profileId: _activeProfileId,
                 profile: _activeProfile,
@@ -359,38 +334,27 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       },
                 onGoSupport: widget.onGoSupport,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: NeuroColors.spacingMd),
               _LatestSessionCard(
                 summary: _latestSummary,
                 isLoading: _isLoadingSummary,
                 onRefresh: _refreshLatestSummary,
+                onViewHistory: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          HistoryInsightsScreen(service: _summaryService),
+                    ),
+                  );
+                  await _refreshLatestSummary();
+                },
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 46,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            HistoryInsightsScreen(service: _summaryService),
-                      ),
-                    );
-                    await _refreshLatestSummary();
-                  },
-                  icon: const Icon(Icons.history),
-                  label: const Text('VIEW HISTORY / INSIGHTS'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 46,
-                child: OutlinedButton.icon(
-                  onPressed: widget.onGoSupport,
-                  icon: const Icon(Icons.support_agent),
-                  label: const Text('GO TO LIVE SUPPORT'),
-                ),
+              const SizedBox(height: NeuroColors.spacingLg),
+              ElevatedButton.icon(
+                onPressed: widget.onGoSupport,
+                icon: const Icon(Icons.support_agent),
+                label: const Text('GO TO LIVE SUPPORT'),
               ),
             ],
           ),
@@ -405,20 +369,24 @@ class _LatestSessionCard extends StatelessWidget {
     required this.summary,
     required this.isLoading,
     required this.onRefresh,
+    required this.onViewHistory,
   });
 
   final SessionSummary? summary;
   final bool isLoading;
   final Future<void> Function() onRefresh;
+  final VoidCallback onViewHistory;
 
   @override
   Widget build(BuildContext context) {
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(NeuroColors.spacingMd),
       decoration: BoxDecoration(
-        color: NeuroColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,7 +394,7 @@ class _LatestSessionCard extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.history_edu, color: NeuroColors.primary),
-              const SizedBox(width: 8),
+              const SizedBox(width: NeuroColors.spacingSm),
               Expanded(
                 child: Text(
                   'Latest Session Summary',
@@ -448,11 +416,11 @@ class _LatestSessionCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NeuroColors.spacingSm),
           if (summary == null) ...[
-            const Text(
+            Text(
               'No completed session yet. Run live support and return to dashboard.',
-              style: TextStyle(color: NeuroColors.textSecondary),
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ] else ...[
             Text(
@@ -462,7 +430,7 @@ class _LatestSessionCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               'Duration ${summary!.durationMinutes} min • ${_formatUtc(summary!.timestampUtc)}',
-              style: const TextStyle(color: NeuroColors.textSecondary),
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
             _InsightRow(
@@ -489,6 +457,15 @@ class _LatestSessionCard extends StatelessWidget {
               text: summary!.followUp,
             ),
           ],
+          const SizedBox(height: NeuroColors.spacingMd),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onViewHistory,
+              icon: const Icon(Icons.history),
+              label: const Text('VIEW HISTORY / INSIGHTS'),
+            ),
+          ),
         ],
       ),
     );
@@ -524,6 +501,7 @@ class _ProfileSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasProfile = profileId != null && profileId!.isNotEmpty;
+    final surfaceColor = Theme.of(context).colorScheme.surface;
     final title = profile?.name.isNotEmpty == true
         ? profile!.name
         : hasProfile
@@ -532,10 +510,10 @@ class _ProfileSummaryCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(NeuroColors.spacingMd),
       decoration: BoxDecoration(
-        color: NeuroColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,7 +521,7 @@ class _ProfileSummaryCard extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.badge_outlined, color: NeuroColors.primary),
-              const SizedBox(width: 8),
+              const SizedBox(width: NeuroColors.spacingSm),
               Expanded(
                 child: Text(
                   'Active Profile Summary',
@@ -558,25 +536,25 @@ class _ProfileSummaryCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: NeuroColors.spacingSm),
           Text(title, style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 6),
+          const SizedBox(height: NeuroColors.spacingSm),
           if (!hasProfile)
-            const Text(
+            Text(
               'Set a profile in Support to help Buddy remember who is being supported and what usually helps.',
-              style: TextStyle(color: NeuroColors.textSecondary),
+              style: Theme.of(context).textTheme.bodyMedium,
             )
           else ...[
             Text(
               profile?.notes.isNotEmpty == true
                   ? profile!.notes
                   : 'Profile is active. Add a short support summary and a few memory notes to make later sessions more personalized.',
-              style: const TextStyle(color: NeuroColors.textSecondary),
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: NeuroColors.spacingMd),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: NeuroColors.spacingSm,
+              runSpacing: NeuroColors.spacingSm,
               children: [
                 _ProfileChip(
                   label: 'Memory notes',
@@ -596,9 +574,8 @@ class _ProfileSummaryCard extends StatelessWidget {
               ],
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: NeuroColors.spacingMd),
           SizedBox(
-            height: 46,
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: hasProfile ? onOpen : onGoSupport,
@@ -624,16 +601,20 @@ class _ProfileChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final chipColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.10);
+    final chipTextColor = Theme.of(context).textTheme.titleSmall?.color ??
+        Theme.of(context).colorScheme.onSurface;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: NeuroColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(14),
+        color: chipColor,
+        borderRadius: BorderRadius.circular(NeuroColors.radiusSm),
       ),
       child: Text(
         '$label: $value',
-        style: const TextStyle(
-          color: NeuroColors.textPrimary,
+        style: TextStyle(
+          color: chipTextColor,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -713,11 +694,168 @@ class _ConnectionDotState extends State<_ConnectionDot>
       child: Container(
         width: 10,
         height: 10,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: NeuroColors.primary,
+          color: Theme.of(context).colorScheme.secondary,
         ),
       ),
     );
   }
+}
+
+// ── Mascot Carousel ──
+
+class _MascotCarousel extends StatefulWidget {
+  const _MascotCarousel();
+
+  @override
+  State<_MascotCarousel> createState() => _MascotCarouselState();
+}
+
+class _MascotCarouselState extends State<_MascotCarousel> {
+  final PageController _pageController = PageController();
+  Timer? _autoSlideTimer;
+  int _currentPage = 0;
+
+  static const List<_CarouselSlide> _slides = [
+    _CarouselSlide(
+      asset: 'assets/mascot01.png',
+      title: 'Hello. Wishing you a calm day.',
+      subtitle:
+          'Review the latest session, check insights, and open Live Support when you need real-time guidance.',
+    ),
+    _CarouselSlide(
+      asset: 'assets/mascot02.png',
+      title: 'Buddy is here for you.',
+      subtitle:
+          'Your AI companion observes, listens, and offers calm guidance during moments that matter most.',
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _autoSlideTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !_pageController.hasClients || _slides.length < 2) {
+        return;
+      }
+      final nextPage = (_currentPage + 1) % _slides.length;
+      _pageController.animateToPage(
+        nextPage,
+        duration: const Duration(milliseconds: 850),
+        curve: Curves.easeInOutCubic,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoSlideTimer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+    final inactiveDotColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.18);
+
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+          ),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 324,
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: _slides.length,
+                  onPageChanged: (index) {
+                    setState(() => _currentPage = index);
+                  },
+                  itemBuilder: (context, index) {
+                    final slide = _slides[index];
+                    return Padding(
+                      padding: const EdgeInsets.all(NeuroColors.spacingMd),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 400),
+                              child: ClipRRect(
+                                key: ValueKey(slide.asset),
+                                borderRadius:
+                                    BorderRadius.circular(NeuroColors.radiusMd),
+                                child: Image.asset(
+                                  slide.asset,
+                                  width: 110,
+                                  height: 110,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: NeuroColors.spacingSm),
+                          Text(
+                            slide.title,
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: NeuroColors.spacingSm),
+                          Text(
+                            slide.subtitle,
+                            style: const TextStyle(
+                                color: NeuroColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding:
+                    const EdgeInsets.only(bottom: NeuroColors.spacingMd),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    _slides.length,
+                    (index) => AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      width: _currentPage == index ? 24 : 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _currentPage == index
+                          ? Theme.of(context).colorScheme.primary
+                          : inactiveDotColor,
+                        borderRadius:
+                            BorderRadius.circular(NeuroColors.radiusPill),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CarouselSlide {
+  const _CarouselSlide({
+    required this.asset,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String asset;
+  final String title;
+  final String subtitle;
 }

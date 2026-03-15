@@ -1,18 +1,22 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
-import '../../theme/app_theme.dart';
 import '../home/home_dashboard_screen.dart';
 import '../mascot/mascot_buddy_screen.dart';
 import '../support/support_hub_screen.dart';
+import '../../theme/app_theme.dart';
 
 class MainShellScreen extends StatefulWidget {
   const MainShellScreen({
     super.key,
     required this.cameras,
+    required this.themeSelection,
+    required this.onThemeChanged,
   });
 
   final List<CameraDescription> cameras;
+  final AppVisualTheme themeSelection;
+  final Future<void> Function(AppVisualTheme theme) onThemeChanged;
 
   @override
   State<MainShellScreen> createState() => _MainShellScreenState();
@@ -34,14 +38,14 @@ class _MainShellScreenState extends State<MainShellScreen> {
           SupportHubScreen(cameras: widget.cameras),
           MascotBuddyScreen(
             cameras: widget.cameras,
+            themeSelection: widget.themeSelection,
+            onThemeChanged: widget.onThemeChanged,
             onGoHome: () => setState(() => _currentIndex = 0),
             onGoSupport: () => setState(() => _currentIndex = 1),
           ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        backgroundColor: NeuroColors.surface,
-        indicatorColor: NeuroColors.primary.withValues(alpha: 0.22),
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           setState(() {
