@@ -951,7 +951,7 @@ async def admin_push_test(
         user_id=user_id,
         profile_id=profile_id,
     )
-    sent = await push_sender.send_to_tokens(
+    push_result = await push_sender.send_to_tokens(
         tokens=tokens,
         title=title,
         body=body,
@@ -960,12 +960,12 @@ async def admin_push_test(
 
     return {
         "status": "ok",
-        "fcm_enabled": bool(push.get("enabled")),
-        "fcm_initialized": bool(push.get("initialized")),
-        "target_device_count": int(push.get("attempted") or len(tokens)),
-        "sent_count": int(push.get("success_count") or 0),
-        "failure_count": int(push.get("failure_count") or 0),
-        "error": push.get("error"),
+        "fcm_enabled": bool(push_result.get("enabled")),
+        "fcm_initialized": bool(push_result.get("initialized")),
+        "target_device_count": int(push_result.get("attempted") or len(tokens)),
+        "sent_count": int(push_result.get("success_count") or 0),
+        "failure_count": int(push_result.get("failure_count") or 0),
+        "error": push_result.get("error"),
     }
 
 
