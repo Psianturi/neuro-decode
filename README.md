@@ -42,10 +42,14 @@ flowchart LR
     B --> C[Gemini Live API]
     B --> D[Audio Observer Model]
     B --> E[Visual Observer Model]
-    B --> F[Firestore: sessions, events, profiles, memory]
+    B --> F[Firestore: sessions, events, profiles, memory, notifications, push tokens]
+    B --> G[Secret Manager]
+    B --> H[Firebase Admin SDK -> FCM]
     D --> C
     E --> C
     F --> B
+    G --> B
+    H --> A
     C -->|audio/transcript| A
 ```
 
@@ -59,19 +63,31 @@ NeuroDecode/
 |- neurodecode_backend/
 |  |- README.md
 |  |- requirements.txt
+|  |- scripts/
+|  |  |- ws_smoke_test.py
+|  |  |- memory_eval_probe.py
 |  |- app/
 |  |  |- main.py
 |  |  |- settings.py
 |  |  |- gemini_live.py
 |  |  |- ai_processor.py
+|  |  |- push_sender.py
+|  |  |- push_device_store.py
+|  |  |- notification_store.py
+|  |  |- rule_debug_store.py
 |  |  |- models/
 |- neurodecode_mobile/
    |- README.md
+    |- pubspec.yaml
    |- lib/
       |- features/support/
       |- features/live_agent/
       |- features/home/
       |- features/profile/
+        |- features/home/push_registration_service.dart
+    |- android/
+        |- app/build.gradle
+        |- settings.gradle
 ```
 
 ## Quick Start
@@ -196,15 +212,39 @@ Suggested Secret Manager names:
 1. `neurodecode-gemini-api-key`
 2. `neurodecode-admin-debug-token`
 
-Example Cloud Run update (replace project/region/service as needed):
+Cloud Run update (PowerShell) - baseline runtime (replace project/region/service as needed):
 
 ```powershell
 gcloud run services update neurodecode-backend `
+    --project gen-lang-client-0348071142 `
     --region asia-southeast1 `
+    --platform managed `
     --set-secrets GEMINI_API_KEY=neurodecode-gemini-api-key:latest `
     --set-secrets NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest `
     --update-env-vars NEURODECODE_ADMIN_DEBUG_ENABLED=1,NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=500,NEURODECODE_FCM_ENABLED=0,NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION=push_device_tokens
 ```
+
+Enable FCM after admin debug passes:
+
+```powershell
+gcloud run services update neurodecode-backend `
+    --project gen-lang-client-0348071142 `
+    --region asia-southeast1 `
+    --platform managed `
+    --update-env-vars NEURODECODE_FCM_ENABLED=1
+```
+
+Quick verification after update:
+
+```powershell
+gcloud run services describe neurodecode-backend `
+    --project gen-lang-client-0348071142 `
+    --region asia-southeast1 `
+    --platform managed `
+    --format="yaml(spec.template.spec.containers[0].env)"
+```
+
+If live session suddenly shows `GEMINI_API_KEY is required`, re-apply the `--set-secrets GEMINI_API_KEY=...` command above because Cloud Run runtime env is source-of-truth (local `.env` does not apply to Cloud Run).
 
 Admin debug endpoint usage (read-only):
 
@@ -223,13 +263,20 @@ FCM activation checklist (after admin debug is healthy):
 5. Turn on `NEURODECODE_FCM_ENABLED=1`.
 6. Verify push send count in Cloud Run logs (`[push] Sent proactive push ...`).
 
+Android Firebase setup required for token issuance:
+
+1. Add [neurodecode_mobile/android/app/google-services.json](neurodecode_mobile/android/app/google-services.json) from Firebase Console for app id `com.neurodecode.neurodecode_mobile`.
+2. Ensure Google Services Gradle plugin is enabled in [neurodecode_mobile/android/settings.gradle](neurodecode_mobile/android/settings.gradle) and [neurodecode_mobile/android/app/build.gradle](neurodecode_mobile/android/app/build.gradle).
+3. Rebuild app after adding file so `FirebaseMessaging.getToken()` can return a valid token.
+
 ## Known Current Gaps
 
 These are tracked and expected in current phase:
 
 1. Mid-response audio can still feel slightly slow on some devices.
 2. Camera preview may fail to initialize on certain OEM/driver combinations (retry fallback exists).
-3. Notification system is still rule-foundation stage, not yet fully autonomous.
+3. FCM banner delivery depends on valid Firebase app setup (`google-services.json`) and valid device token registration.
+
 
 ## Release Regression Checklist
 
@@ -259,7 +306,6 @@ Run this checklist before each release/deploy that touches live session, prompt,
     - Expect: unread/read behavior works and references correct session/profile.
 
 Suggested status format per item: `PASS`, `FAIL`, `N/A`.
-
 
 
 

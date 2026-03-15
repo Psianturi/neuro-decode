@@ -1,125 +1,103 @@
 # NeuroDecode AI (Backend)
 
-FastAPI backend for **NeuroDecode AI** (Gemini Live Agent Challenge MVP).
+FastAPI backend for NeuroDecode AI, serving live multimodal support sessions plus post-session proactive automation.
 
-## What this backend does (MVP)
+## Current backend capabilities
 
-- Exposes a WebSocket endpoint for a **live, interruptible** session.
-- Bridges client streaming input (audio/text) to **Gemini Live API** using **Google GenAI SDK**.
-- Streams model audio chunks back to the client.
+- Live WebSocket streaming endpoint (`/ws/live`) for audio/text turns.
+- Gemini Live bridge with transcript support and audio chunk streaming.
+- Session summary generation and storage.
+- Rule-based proactive notifications (`notification_items`).
+- Admin debug APIs for rules and push rollout checks.
+- Feature-flagged FCM delivery via Firebase Admin SDK.
 
-## Current progress (what you should see working now)
+## Core endpoints
 
-When everything is running, a WebSocket client should receive streaming events like:
+HTTP:
 
-- `model_audio` (base64) with `mime_type: audio/pcm;rate=24000`
-- `transcript_out` / `transcript_in` (text) when transcription is enabled
-- sometimes `model_text` (text) depending on model output
+- `GET /health`
+- `GET /sessions`
+- `GET /sessions/latest`
+- `GET /notifications`
+- `POST /notifications/{notification_id}/read`
+- `GET /profiles/{profile_id}`
+- `PUT /profiles/{profile_id}`
+- `GET /profiles/{profile_id}/memory`
+- `POST /profiles/{profile_id}/memory`
+- `GET /profiles/{profile_id}/memory-context`
+- `POST /devices/push-token`
+- `POST /devices/push-token/deactivate`
+- `GET /admin/rules/debug` (admin token required)
+- `GET /admin/push/devices` (admin token required)
+- `POST /admin/push/test` (admin token required)
 
-The included smoke test sends a text turn and prints a few server messages. In a successful “real mode” run, you should see at least one `model_audio` event (often very large) and transcription text.
+WebSocket:
+
+- `GET /ws/live?user_id=<id>&profile_id=<optional>`
 
 ## Local run (Windows PowerShell)
-
-1) Create a venv and install deps (run from the backend folder):
 
 ```powershell
 cd c:\PROJ\NeuroDecode\neurodecode_backend
 python -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\pip install -r requirements.txt
-```
 
-2) Set your API key for the *current terminal session* (recommended while testing):
-
-```powershell
 $env:GEMINI_API_KEY = "YOUR_KEY_HERE"
-```
+$env:NEURODECODE_SUMMARY_ENABLED = "1"
+$env:NEURODECODE_FIRESTORE_ENABLED = "1"
 
-Notes:
-
-- `setx` sets a persistent env var, but it will NOT affect the currently-open terminal.
-
-3) Start server (use the backend venv python explicitly):
-
-```powershell
 .\.venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-4) Smoke test the WebSocket:
+Smoke tests:
 
 ```powershell
 .\.venv\Scripts\python scripts\ws_smoke_test.py
+.\.venv\Scripts\python scripts\memory_eval_probe.py --profile-id joy1 --runs 1
 ```
 
-## WebSocket protocol (simple JSON)
+## Cloud Run deploy notes
 
-Client → Server:
+Current default deployment target in this repo:
 
-- `{"type":"audio","data_b64":"...","mime_type":"audio/pcm;rate=16000"}`
-- `{"type":"text","text":"hello","end_of_turn":true}`
-- `{"type":"observer_note","text":"Internal observation: ..."}` (best-effort; used for the “silent observer” channel)
+- Region: `asia-southeast1`
+- Service: `neurodecode-backend`
+- Trigger file: `cloudbuild.yaml` in repository root
 
-Server → Client:
-
-- `{"type":"model_audio","data_b64":"...","mime_type":"audio/pcm;rate=24000"}`
-- `{"type":"model_audio_end"}` (marks end of one model audio turn)
-- `{"type":"transcript_in","text":"..."}` (if enabled)
-- `{"type":"transcript_out","text":"..."}` (if enabled)
-- `{"type":"interrupted"}`
-
-## Deployment notes (Cloud Run)
-
-### What you need before deploy
-
-- A Google Cloud project + billing enabled
-- `gcloud` CLI installed and authenticated (`gcloud auth login`)
-- Cloud Run supports WebSockets, but set a long request timeout for long sessions
-
-Enable APIs (one-time per project):
+Deploy/update runtime secrets and flags:
 
 ```powershell
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+gcloud run services update neurodecode-backend `
+	--project gen-lang-client-0348071142 `
+	--region asia-southeast1 `
+	--platform managed `
+	--set-secrets GEMINI_API_KEY=neurodecode-gemini-api-key:latest `
+	--set-secrets NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest `
+	--update-env-vars NEURODECODE_ADMIN_DEBUG_ENABLED=1,NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=500,NEURODECODE_FCM_ENABLED=0,NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION=push_device_tokens
 ```
 
-### Deploy from source (Cloud Build)
-
-Run this from the backend folder:
+Enable FCM later (after admin test is healthy):
 
 ```powershell
-cd c:\PROJ\NeuroDecode\neurodecode_backend
-gcloud run deploy neurodecode-backend --source . --region asia-southeast2 --allow-unauthenticated --timeout 3600 --concurrency 1
+gcloud run services update neurodecode-backend `
+	--project gen-lang-client-0348071142 `
+	--region asia-southeast1 `
+	--platform managed `
+	--update-env-vars NEURODECODE_FCM_ENABLED=1
 ```
 
-Notes:
-
-- `--timeout 3600` helps keep WebSocket sessions alive (up to 60 minutes).
-- `--concurrency 1` is a safe default for live audio sessions.
-
-### Set environment variables
-
-Minimum required:
-
-- `GEMINI_API_KEY` (recommended via Secret Manager)
-
-Optional:
-
-- `NEURODECODE_LIVE_MODEL`
-- `NEURODECODE_RESPONSE_MODALITY` (default: `AUDIO`)
-- `NEURODECODE_VOICE_NAME`
-- `NEURODECODE_INPUT_TRANSCRIPTION` / `NEURODECODE_OUTPUT_TRANSCRIPTION`
-
-Secret Manager (recommended) example:
+Verify runtime env:
 
 ```powershell
-echo -n "YOUR_KEY_HERE" | gcloud secrets create neurodecode-gemini-api-key --data-file=-
-gcloud run services update neurodecode-backend --region asia-southeast2 --set-secrets GEMINI_API_KEY=neurodecode-gemini-api-key:latest
+gcloud run services describe neurodecode-backend `
+	--project gen-lang-client-0348071142 `
+	--region asia-southeast1 `
+	--platform managed `
+	--format="yaml(spec.template.spec.containers[0].env)"
 ```
 
-If your `gcloud` version doesn’t support `--set-secrets`, set the env var via the Cloud Run Console (Variables & Secrets) instead.
+Important:
 
-### Cloud Run URL
-
-Use:
-
-- `wss://YOUR_CLOUD_RUN_URL/ws/live` for WebSocket
-- `https://YOUR_CLOUD_RUN_URL/health` for health check
+- Cloud Run does not read local `.env`; runtime values must come from service env and Secret Manager.
+- If live session returns `GEMINI_API_KEY is required`, re-apply `--set-secrets GEMINI_API_KEY=...`.
