@@ -99,7 +99,7 @@ def get_settings() -> Settings:
     firestore_project = os.getenv("NEURODECODE_FIRESTORE_PROJECT") or None
 
     admin_debug_enabled = os.getenv(
-        "NEURODECODE_ADMIN_DEBUG_ENABLED", "0"
+        "NEURODECODE_ADMIN_DEBUG_ENABLED", "1"
     ).strip() not in {"0", "false", "False"}
     admin_debug_token = os.getenv("NEURODECODE_ADMIN_DEBUG_TOKEN") or None
     admin_debug_max_items = max(
