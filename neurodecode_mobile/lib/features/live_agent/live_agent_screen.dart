@@ -270,17 +270,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     _handleSocketClosed(manual: true);
   }
 
-  void _openObserverPanel() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => ObserverPanelSheet(
-        events: _observerEvents,
-      ),
-    );
-  }
-
   void _onMessageReceived(dynamic message) {
     if (!mounted || _isCleaningUp) {
       return;
@@ -1138,42 +1127,6 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
       case AgentState.idle:
         return Colors.grey;
     }
-  }
-
-  void _openDebugLog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Debug Log'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: ListView.builder(
-            itemCount: _debugLog.length,
-            itemBuilder: (_, i) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1),
-              child: Text(
-                _debugLog[i],
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              setState(() => _debugLog.clear());
-              Navigator.pop(ctx);
-            },
-            child: const Text('Clear'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override

@@ -6,6 +6,7 @@ import '../../config/app_identity_store.dart';
 import 'history_insights_screen.dart';
 import 'notification_service.dart';
 import 'notifications_center_screen.dart';
+import 'push_registration_service.dart';
 import '../profile/profile_memory_screen.dart';
 import '../profile/profile_memory_service.dart';
 import 'session_summary_service.dart';
@@ -28,6 +29,7 @@ class HomeDashboardScreen extends StatefulWidget {
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final SessionSummaryService _summaryService = SessionSummaryService();
   final NotificationService _notificationService = NotificationService();
+  final PushRegistrationService _pushRegistrationService = PushRegistrationService();
   final AppIdentityStore _identityStore = AppIdentityStore();
   final ProfileMemoryService _profileService = ProfileMemoryService();
   SessionSummary? _latestSummary;
@@ -38,6 +40,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   bool _isCheckingUnreadSync = false;
   bool _isLoadingProfile = false;
   bool _isCheckingProfileId = false;
+  bool _isSyncingPushToken = false;
   String? _activeProfileId;
   int _unreadNotificationCount = 0;
   DateTime? _lastUnreadSyncAt;
@@ -48,6 +51,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     _refreshLatestSummary();
     _refreshUnreadNotifications();
     _loadActiveProfileId();
+    _syncPushToken();
   }
 
   Future<void> _loadActiveProfileId() async {
@@ -61,6 +65,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     if (profileId != null && profileId.isNotEmpty) {
       await _refreshProfileSummary();
     }
+    await _syncPushToken();
   }
 
   void _scheduleProfileIdSync() {
@@ -86,9 +91,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           _profileContext = null;
         });
       }
+      await _syncPushToken();
     }).whenComplete(() {
       _isCheckingProfileId = false;
     });
+  }
+
+  Future<void> _syncPushToken() async {
+    if (_isSyncingPushToken) {
+      return;
+    }
+    _isSyncingPushToken = true;
+    try {
+      await _pushRegistrationService.registerCurrentDeviceToken();
+    } catch (_) {
+      // Do not disrupt the dashboard if push registration fails.
+    } finally {
+      _isSyncingPushToken = false;
+    }
   }
 
   void _scheduleUnreadSync() {
