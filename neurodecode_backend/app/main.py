@@ -810,6 +810,36 @@ async def register_push_token(
     }
 
 
+@app.post("/devices/push-token/deactivate")
+async def deactivate_push_token(
+    payload: dict[str, object],
+    user_id: str | None = None,
+) -> dict[str, object]:
+    if not user_id:
+        return {
+            "status": "error",
+            "message": "user_id is required",
+        }
+
+    token = str(payload.get("token") or "").strip()
+    if not token:
+        return {
+            "status": "error",
+            "message": "token is required",
+        }
+
+    updated = await push_device_store.deactivate(user_id=user_id, token=token)
+    if not updated:
+        return {
+            "status": "empty",
+            "message": "Push token not found",
+        }
+
+    return {
+        "status": "ok",
+    }
+
+
 @app.get("/admin/rules/debug")
 async def admin_rules_debug(
     admin_token: str | None = None,
@@ -877,6 +907,55 @@ async def admin_push_devices(
         "status": "ok",
         "count": len(items),
         "items": items,
+    }
+
+
+@app.post("/admin/push/test")
+async def admin_push_test(
+    payload: dict[str, object],
+    admin_token: str | None = None,
+    user_id: str | None = None,
+    profile_id: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not _is_admin_authorized(
+        admin_token_query=admin_token,
+        admin_token_header=x_admin_token,
+    ):
+        return {
+            "status": "forbidden",
+            "message": "Admin debug endpoint is disabled or token is invalid.",
+        }
+
+    if not user_id:
+        return {
+            "status": "error",
+            "message": "user_id is required",
+        }
+
+    title = str(payload.get("title") or "NeuroDecode Test Push").strip() or "NeuroDecode Test Push"
+    body = str(payload.get("message") or "This is a test push from admin endpoint.").strip()
+    data = {
+        "type": "admin_test",
+        "profile_id": profile_id or "",
+    }
+
+    tokens = await push_device_store.list_active_tokens(
+        user_id=user_id,
+        profile_id=profile_id,
+    )
+    sent = await push_sender.send_to_tokens(
+        tokens=tokens,
+        title=title,
+        body=body,
+        data=data,
+    )
+
+    return {
+        "status": "ok",
+        "fcm_enabled": _startup_settings.fcm_enabled,
+        "target_device_count": len(tokens),
+        "sent_count": sent,
     }
 
 

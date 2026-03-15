@@ -129,8 +129,10 @@ Key HTTP endpoints:
 6. `POST /profiles/{profile_id}/memory`
 7. `GET /profiles/{profile_id}/memory-context`
 8. `POST /devices/push-token`
-9. `GET /admin/rules/debug` (admin token required)
-10. `GET /admin/push/devices` (admin token required)
+9. `POST /devices/push-token/deactivate`
+10. `GET /admin/rules/debug` (admin token required)
+11. `GET /admin/push/devices` (admin token required)
+12. `POST /admin/push/test` (admin token required)
 
 WebSocket:
 
@@ -209,14 +211,17 @@ Admin debug endpoint usage (read-only):
 ```text
 GET /admin/rules/debug?admin_token=<TOKEN>&profile_id=<PROFILE_ID>&limit=20
 GET /admin/push/devices?admin_token=<TOKEN>&user_id=<USER_ID>&profile_id=<PROFILE_ID>&limit=20
+POST /admin/push/test?admin_token=<TOKEN>&user_id=<USER_ID>&profile_id=<PROFILE_ID>
 ```
 
 FCM activation checklist (after admin debug is healthy):
 
 1. Device registers token via `POST /devices/push-token`.
-2. Backend receives proactive notifications as usual.
-3. Turn on `NEURODECODE_FCM_ENABLED=1`.
-4. Verify push send count in Cloud Run logs (`[push] Sent proactive push ...`).
+2. If needed, deactivate stale token via `POST /devices/push-token/deactivate`.
+3. Use admin test push endpoint before enabling production fanout.
+4. Backend receives proactive notifications as usual.
+5. Turn on `NEURODECODE_FCM_ENABLED=1`.
+6. Verify push send count in Cloud Run logs (`[push] Sent proactive push ...`).
 
 ## Known Current Gaps
 

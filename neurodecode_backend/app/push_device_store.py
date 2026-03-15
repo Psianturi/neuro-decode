@@ -57,6 +57,28 @@ class PushDeviceStore:
         doc_id = self._device_key(user_id=user_id, token=token)
         client.collection(self._device_collection).document(doc_id).set(record, merge=True)
 
+    def _deactivate_firestore(self, *, user_id: str, token: str) -> bool:
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("Firestore client unavailable")
+
+        doc_id = self._device_key(user_id=user_id, token=token)
+        doc_ref = client.collection(self._device_collection).document(doc_id)
+        snapshot = doc_ref.get()
+        if not snapshot.exists:
+            return False
+
+        now = datetime.now(timezone.utc).isoformat()
+        doc_ref.set(
+            {
+                "active": False,
+                "updated_at_utc": now,
+                "deactivated_at_utc": now,
+            },
+            merge=True,
+        )
+        return True
+
     def _list_firestore(self, *, user_id: str, profile_id: str | None) -> list[dict[str, object]]:
         client = self._get_client()
         if client is None:
@@ -144,6 +166,38 @@ class PushDeviceStore:
             seen.add(token)
             tokens.append(token)
         return tokens
+
+    async def deactivate(self, *, user_id: str, token: str) -> bool:
+        token_clean = token.strip()
+        if not token_clean:
+            return False
+
+        key = self._device_key(user_id=user_id, token=token_clean)
+        updated = False
+        now = datetime.now(timezone.utc).isoformat()
+
+        async with self._lock:
+            existing = self._memory.get(key)
+            if isinstance(existing, dict):
+                row = dict(existing)
+                row["active"] = False
+                row["updated_at_utc"] = now
+                row["deactivated_at_utc"] = now
+                self._memory[key] = row
+                updated = True
+
+        if self._firestore_enabled:
+            try:
+                firestore_updated = await asyncio.to_thread(
+                    self._deactivate_firestore,
+                    user_id=user_id,
+                    token=token_clean,
+                )
+                updated = updated or firestore_updated
+            except Exception as e:
+                print(f"[push_device_store] Firestore deactivate failed: {e}")
+
+        return updated
 
     async def list_active_devices(
         self,
