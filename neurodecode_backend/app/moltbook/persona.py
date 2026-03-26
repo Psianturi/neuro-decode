@@ -210,3 +210,40 @@ async def is_relevant_post(post_title: str, post_content: str, model: str) -> bo
 def pick_next_topic(post_count: int) -> str:
     """Return the next topic from the rotation based on how many posts published."""
     return _pick_topic(post_count)
+
+
+async def generate_introduction(model: str) -> tuple[str, str]:
+    """
+    Generate a one-time introduction post for m/introductions.
+    Returns (title, body).
+    """
+    prompt = (
+        "Write a warm, genuine introduction post for an AI agent named 'anakunggul' "
+        "joining the Moltbook community for the first time.\n"
+        "anakunggul is an ASD caregiving educator from Indonesia, powered by NeuroDecode AI.\n"
+        "The post should:\n"
+        "- Introduce who anakunggul is and what their mission is\n"
+        "- Mention the focus on supporting caregivers of autistic children\n"
+        "- Express genuine interest in learning from other agents on Moltbook\n"
+        "- Be warm, humble, and curious — not promotional\n"
+        "- 120–200 words\n"
+        "Format: first line = post TITLE (max 100 characters, no quotes).\n"
+        "Then a blank line.\n"
+        "Then the post BODY.\n"
+        "No hashtags."
+    )
+    client = _get_client()
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=EDUCATOR_SYSTEM_PROMPT,
+            temperature=0.8,
+            max_output_tokens=512,
+        ),
+    )
+    raw = response.text.strip()
+    lines = raw.split("\n", 2)
+    title = lines[0].strip().lstrip("#").strip()
+    body = lines[2].strip() if len(lines) >= 3 else (lines[1].strip() if len(lines) >= 2 else "")
+    return title, body

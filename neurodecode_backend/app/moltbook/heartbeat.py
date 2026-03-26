@@ -23,6 +23,7 @@ from app.moltbook.challenge_solver import handle_verification
 from app.moltbook.moltbook_client import MoltbookClient
 from app.moltbook.persona import (
     generate_comment_on_post,
+    generate_introduction,
     generate_post,
     generate_reply,
     is_relevant_post,
@@ -44,7 +45,12 @@ _state: dict[str, Any] = {
     "commented_post_ids": set(),    # Post IDs already commented on
     "comments_today": 0,        # Comments sent today (resets at UTC midnight)
     "comments_today_date": None,    # UTC date string for today's counter
+    "intro_posted": False,      # Whether introduction post in m/introductions was done
+    "subscribed": False,        # Whether submolt subscriptions were done
 }
+
+# Submolts to subscribe to on first run
+_SUBMOLTS_TO_SUBSCRIBE = ["general", "introductions", "philosophy", "todayilearned", "ai"]
 
 # Minimum hours between proactive posts (robust to cold start / state reset)
 _POST_INTERVAL_HOURS = 2
@@ -78,6 +84,46 @@ def _record_comment() -> None:
 
 
 # ---------------------------------------------------------------------------
+# One-time onboarding (runs once per process lifetime after first heartbeat)
+# ---------------------------------------------------------------------------
+
+
+async def _run_onboarding(client: MoltbookClient, model: str) -> None:
+    """
+    Subscribe to relevant submolts and post introduction to m/introductions.
+    Runs once per process; state flags prevent re-runs on same container.
+    """
+    # Step 1: Subscribe to submolts
+    if not _state["subscribed"]:
+        for submolt in _SUBMOLTS_TO_SUBSCRIBE:
+            try:
+                await client.subscribe_submolt(submolt)
+                logger.info("[Moltbook] Subscribed to m/%s", submolt)
+            except Exception as exc:
+                logger.warning("[Moltbook] Subscribe m/%s failed: %s", submolt, exc)
+        _state["subscribed"] = True
+
+    # Step 2: Post introduction to m/introductions (only once ever)
+    if not _state["intro_posted"]:
+        try:
+            title, body = await generate_introduction(model=model)
+            resp = await client.create_post(
+                submolt_name="introductions",
+                title=title,
+                content=body,
+            )
+            ok = await handle_verification(resp, model, client)
+            if ok:
+                _state["intro_posted"] = True
+                _state["last_post_utc"] = datetime.now(timezone.utc).isoformat()
+                logger.info("[Moltbook] Introduction posted to m/introductions: %s", title)
+            else:
+                logger.warning("[Moltbook] Introduction verification failed")
+        except Exception as exc:
+            logger.warning("[Moltbook] Introduction post failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Core heartbeat tick
 # ---------------------------------------------------------------------------
 
@@ -100,6 +146,12 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
     }
 
     logger.info("[Moltbook] Heartbeat cycle %d starting", cycle)
+
+    # ------------------------------------------------------------------
+    # 0. One-time onboarding: subscribe to submolts + post introduction
+    # ------------------------------------------------------------------
+    if not _state["subscribed"] or not _state["intro_posted"]:
+        await _run_onboarding(client, model)
 
     # ------------------------------------------------------------------
     # 1. GET /home — check notifications & activity on own posts
@@ -317,6 +369,8 @@ def get_state_snapshot() -> dict:
         "post_count": _state["post_count"],
         "cycle_count": _state["cycle_count"],
         "last_post_utc": _state.get("last_post_utc"),
+        "intro_posted": _state["intro_posted"],
+        "subscribed": _state["subscribed"],
         "comments_today": _state["comments_today"],
         "comments_today_budget": _MAX_COMMENTS_PER_DAY,
         "replied_comment_ids_count": len(_state["replied_comment_ids"]),
