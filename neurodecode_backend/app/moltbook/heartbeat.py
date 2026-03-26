@@ -42,14 +42,39 @@ _state: dict[str, Any] = {
     "cycle_count": 0,           # Total heartbeat cycles run
     "replied_comment_ids": set(),   # Comment IDs already replied to
     "commented_post_ids": set(),    # Post IDs already commented on
+    "comments_today": 0,        # Comments sent today (resets at UTC midnight)
+    "comments_today_date": None,    # UTC date string for today's counter
 }
 
 # Minimum hours between proactive posts (robust to cold start / state reset)
 _POST_INTERVAL_HOURS = 2
+# Moltbook rule: max 50 comments/day (established agent). We cap at 40 for safety.
+_MAX_COMMENTS_PER_DAY = 40
 # Max NEW comments from others we'll reply to per cycle
-_MAX_REPLIES_PER_CYCLE = 3
+_MAX_REPLIES_PER_CYCLE = 2
 # Max other agents' posts we'll comment on per cycle
 _MAX_EXTERNAL_COMMENTS_PER_CYCLE = 2
+# Moltbook rule: min 20s between comments (established). We use 22s for safety.
+_COMMENT_COOLDOWN_SECONDS = 22
+
+
+# ---------------------------------------------------------------------------
+# Daily comment counter (resets at UTC midnight)
+# ---------------------------------------------------------------------------
+
+
+def _can_comment() -> bool:
+    """Check daily comment budget. Returns False if limit reached."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _state["comments_today_date"] != today:
+        _state["comments_today"] = 0
+        _state["comments_today_date"] = today
+    return _state["comments_today"] < _MAX_COMMENTS_PER_DAY
+
+
+def _record_comment() -> None:
+    """Increment daily comment counter."""
+    _state["comments_today"] += 1
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +146,9 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
             content: str = comment.get("content", "")
             if not content:
                 continue
+            if not _can_comment():
+                logger.info("[Moltbook] Daily comment budget reached, skipping replies")
+                break
 
             try:
                 reply_text = await generate_reply(
@@ -137,6 +165,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                 ok = await handle_verification(resp, model, client)
                 if ok:
                     _state["replied_comment_ids"].add(comment_id)
+                    _record_comment()
                     replies_sent += 1
                     logger.info(
                         "[Moltbook] Replied to comment %s on post %s", comment_id, post_id
@@ -145,7 +174,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                     logger.warning(
                         "[Moltbook] Reply verification failed for comment %s", comment_id
                     )
-                await asyncio.sleep(8)
+                await asyncio.sleep(_COMMENT_COOLDOWN_SECONDS)
             except Exception as exc:
                 logger.warning("[Moltbook] Reply failed: %s", exc)
                 summary["errors"].append(f"reply: {exc}")
@@ -195,6 +224,10 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                     pass
                 continue
 
+            if not _can_comment():
+                logger.info("[Moltbook] Daily comment budget reached, skipping external comments")
+                break
+
             # Comment on the relevant post
             try:
                 comment_text = await generate_comment_on_post(
@@ -210,6 +243,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                 ok = await handle_verification(resp, model, client)
                 if ok:
                     _state["commented_post_ids"].add(feed_post_id)
+                    _record_comment()
                     await client.upvote_post(feed_post_id)
                     external_comments += 1
                     logger.info("[Moltbook] Commented on external post %s", feed_post_id)
@@ -218,7 +252,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                         "[Moltbook] External comment verification failed for post %s — resp: %s",
                         feed_post_id, resp
                     )
-                await asyncio.sleep(8)
+                await asyncio.sleep(_COMMENT_COOLDOWN_SECONDS)
             except Exception as exc:
                 logger.warning("[Moltbook] External comment failed: %s", exc)
                 summary["errors"].append(f"external_comment: {exc}")
@@ -283,6 +317,8 @@ def get_state_snapshot() -> dict:
         "post_count": _state["post_count"],
         "cycle_count": _state["cycle_count"],
         "last_post_utc": _state.get("last_post_utc"),
+        "comments_today": _state["comments_today"],
+        "comments_today_budget": _MAX_COMMENTS_PER_DAY,
         "replied_comment_ids_count": len(_state["replied_comment_ids"]),
         "commented_post_ids_count": len(_state["commented_post_ids"]),
     }
