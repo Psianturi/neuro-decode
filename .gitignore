@@ -9,6 +9,7 @@ venv/
 .env
 .env.*
 !*.env.example
+!.env.moltbook.example
 .moltbook_credentials.json
 
 # FastAPI / tooling
