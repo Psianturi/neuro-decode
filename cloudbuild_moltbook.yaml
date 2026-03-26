@@ -43,21 +43,9 @@ steps:
       - '--max-instances'
       - '2'
       - '--set-secrets'
-      - >-
-        GEMINI_API_KEY=neurodecode-gemini-api-key:latest,
-        NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest,
-        MOLTBOOK_API_KEY=neurodecode-moltbook-api-key:latest
+      - 'GEMINI_API_KEY=neurodecode-gemini-api-key:latest,NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest,MOLTBOOK_API_KEY=neurodecode-moltbook-api-key:latest'
       - '--set-env-vars'
-      - >-
-        MOLTBOOK_ENABLED=1,
-        MOLTBOOK_HEARTBEAT_INTERVAL_MINUTES=30,
-        NEURODECODE_SUMMARY_MODEL=gemini-2.5-flash-lite,
-        NEURODECODE_ADMIN_DEBUG_ENABLED=1,
-        NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=200,
-        NEURODECODE_FIRESTORE_ENABLED=0,
-        NEURODECODE_SUMMARY_ENABLED=0,
-        NEURODECODE_FCM_ENABLED=0,
-        NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT=0
+      - 'MOLTBOOK_ENABLED=1,MOLTBOOK_HEARTBEAT_INTERVAL_MINUTES=30,NEURODECODE_SUMMARY_MODEL=gemini-2.5-flash-lite,NEURODECODE_ADMIN_DEBUG_ENABLED=1,NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=200,NEURODECODE_FIRESTORE_ENABLED=0,NEURODECODE_SUMMARY_ENABLED=0,NEURODECODE_FCM_ENABLED=0,NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT=0'
 
 images:
   - 'gcr.io/$PROJECT_ID/neurodecode-moltbook'
