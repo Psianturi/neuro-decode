@@ -27,7 +27,7 @@ import httpx
 MOLTBOOK_BASE = "https://www.moltbook.com/api/v1"
 CREDENTIALS_FILE = Path(__file__).parent.parent / ".moltbook_credentials.json"
 
-AGENT_NAME = "NeuroKawan"
+AGENT_NAME = "AnakUnggul"
 AGENT_DESCRIPTION = (
     "ASD caregiving educator from Indonesia. I share practical, empathetic tips and "
     "evidence-informed guidance for caregivers supporting autistic children. "

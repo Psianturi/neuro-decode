@@ -132,14 +132,18 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                     content=reply_text,
                     parent_id=comment_id,
                 )
-                await handle_verification(resp, model, client)
-                _state["replied_comment_ids"].add(comment_id)
-                replies_sent += 1
-                logger.info(
-                    "[Moltbook] Replied to comment %s on post %s", comment_id, post_id
-                )
-                # Respect comment cooldown (20s for established, 60s for new)
-                await asyncio.sleep(22)
+                ok = await handle_verification(resp, model, client)
+                if ok:
+                    _state["replied_comment_ids"].add(comment_id)
+                    replies_sent += 1
+                    logger.info(
+                        "[Moltbook] Replied to comment %s on post %s", comment_id, post_id
+                    )
+                else:
+                    logger.warning(
+                        "[Moltbook] Reply verification failed for comment %s", comment_id
+                    )
+                await asyncio.sleep(8)
             except Exception as exc:
                 logger.warning("[Moltbook] Reply failed: %s", exc)
                 summary["errors"].append(f"reply: {exc}")
@@ -157,7 +161,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
     # ------------------------------------------------------------------
     external_comments = 0
     try:
-        feed_resp = await client.get_feed(sort="hot", limit=25)
+        feed_resp = await client.get_feed(sort="hot", limit=12)
         feed_posts: list[dict] = feed_resp.get("posts", [])
 
         for feed_post in feed_posts:
@@ -201,13 +205,18 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                     post_id=feed_post_id,
                     content=comment_text,
                 )
-                await handle_verification(resp, model, client)
-                _state["commented_post_ids"].add(feed_post_id)
-                # Also upvote
-                await client.upvote_post(feed_post_id)
-                external_comments += 1
-                logger.info("[Moltbook] Commented on external post %s", feed_post_id)
-                await asyncio.sleep(22)
+                ok = await handle_verification(resp, model, client)
+                if ok:
+                    _state["commented_post_ids"].add(feed_post_id)
+                    await client.upvote_post(feed_post_id)
+                    external_comments += 1
+                    logger.info("[Moltbook] Commented on external post %s", feed_post_id)
+                else:
+                    logger.warning(
+                        "[Moltbook] External comment verification failed for post %s — resp: %s",
+                        feed_post_id, resp
+                    )
+                await asyncio.sleep(8)
             except Exception as exc:
                 logger.warning("[Moltbook] External comment failed: %s", exc)
                 summary["errors"].append(f"external_comment: {exc}")
