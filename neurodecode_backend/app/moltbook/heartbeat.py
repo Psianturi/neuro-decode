@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.moltbook.challenge_solver import handle_verification
@@ -37,14 +37,15 @@ logger = logging.getLogger(__name__)
 
 _state: dict[str, Any] = {
     "last_check_utc": None,     # ISO timestamp of last heartbeat
+    "last_post_utc": None,      # ISO timestamp of last published post
     "post_count": 0,            # Total posts published by this agent
     "cycle_count": 0,           # Total heartbeat cycles run
     "replied_comment_ids": set(),   # Comment IDs already replied to
     "commented_post_ids": set(),    # Post IDs already commented on
 }
 
-# How many cycles between proactive posts (1 per ~2 hours at 30-min interval)
-_POST_EVERY_N_CYCLES = 4
+# Minimum hours between proactive posts (robust to cold start / state reset)
+_POST_INTERVAL_HOURS = 2
 # Max NEW comments from others we'll reply to per cycle
 _MAX_REPLIES_PER_CYCLE = 3
 # Max other agents' posts we'll comment on per cycle
@@ -69,6 +70,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
         "replies_sent": 0,
         "external_comments": 0,
         "post_created": False,
+        "hours_since_last_post": None,
         "errors": [],
     }
 
@@ -228,9 +230,15 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
     summary["external_comments"] = external_comments
 
     # ------------------------------------------------------------------
-    # 4. Create a proactive educational post (every N cycles)
+    # 4. Create a proactive educational post (time-based, robust to cold start)
     # ------------------------------------------------------------------
-    if cycle % _POST_EVERY_N_CYCLES == 0:
+    now_utc = datetime.now(timezone.utc)
+    last_post = _state.get("last_post_utc")
+    hours_since_post = (
+        (now_utc - datetime.fromisoformat(last_post)).total_seconds() / 3600
+        if last_post else _POST_INTERVAL_HOURS + 1  # First run: always eligible
+    )
+    if hours_since_post >= _POST_INTERVAL_HOURS:
         topic = pick_next_topic(_state["post_count"])
         try:
             title, body = await generate_post(topic=topic, model=model)
@@ -242,12 +250,21 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
             ok = await handle_verification(resp, model, client)
             if ok:
                 _state["post_count"] += 1
+                _state["last_post_utc"] = now_utc.isoformat()
                 summary["post_created"] = True
                 logger.info("[Moltbook] Post published: %s", title)
+            else:
+                logger.warning("[Moltbook] Post verification failed: %s", resp)
         except Exception as exc:
             logger.warning("[Moltbook] Post creation failed: %s", exc)
             summary["errors"].append(f"post: {exc}")
+    else:
+        logger.info(
+            "[Moltbook] Skipping post — %.1fh since last (need %.1fh)",
+            hours_since_post, _POST_INTERVAL_HOURS,
+        )
 
+    summary["hours_since_last_post"] = round(hours_since_post, 1)
     logger.info(
         "[Moltbook] Cycle %d done — replies=%d ext_comments=%d post=%s errors=%d",
         cycle,
@@ -265,6 +282,7 @@ def get_state_snapshot() -> dict:
         "last_check_utc": _state["last_check_utc"],
         "post_count": _state["post_count"],
         "cycle_count": _state["cycle_count"],
+        "last_post_utc": _state.get("last_post_utc"),
         "replied_comment_ids_count": len(_state["replied_comment_ids"]),
         "commented_post_ids_count": len(_state["commented_post_ids"]),
     }
