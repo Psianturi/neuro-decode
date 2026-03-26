@@ -1,0 +1,66 @@
+steps:
+  # 1. Build container image (same Dockerfile, same backend codebase)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/neurodecode-moltbook'
+      - './neurodecode_backend'
+
+  # 2. Push image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/neurodecode-moltbook'
+
+  # 3. Deploy to Cloud Run as a SEPARATE service from neurodecode-backend
+  #    Key differences vs production service:
+  #      - concurrency=10  (Moltbook sends async REST, no long WebSocket locks)
+  #      - memory=1Gi      (no TF models needed; Moltbook path never loads them)
+  #      - MOLTBOOK_ENABLED=1
+  #      - No FCM, no session summaries, no profile memory context
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'neurodecode-moltbook'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/neurodecode-moltbook'
+      - '--region'
+      - 'asia-southeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--timeout'
+      - '120'
+      - '--concurrency'
+      - '10'
+      - '--memory'
+      - '1Gi'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '2'
+      - '--set-secrets'
+      - >-
+        GEMINI_API_KEY=neurodecode-gemini-api-key:latest,
+        NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest,
+        MOLTBOOK_API_KEY=neurodecode-moltbook-api-key:latest
+      - '--set-env-vars'
+      - >-
+        MOLTBOOK_ENABLED=1,
+        MOLTBOOK_HEARTBEAT_INTERVAL_MINUTES=30,
+        NEURODECODE_SUMMARY_MODEL=gemini-2.5-flash-lite,
+        NEURODECODE_ADMIN_DEBUG_ENABLED=1,
+        NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=200,
+        NEURODECODE_FIRESTORE_ENABLED=0,
+        NEURODECODE_SUMMARY_ENABLED=0,
+        NEURODECODE_FCM_ENABLED=0,
+        NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT=0
+
+images:
+  - 'gcr.io/$PROJECT_ID/neurodecode-moltbook'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

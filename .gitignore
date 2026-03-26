@@ -9,6 +9,7 @@ venv/
 .env
 .env.*
 !*.env.example
+.moltbook_credentials.json
 
 # FastAPI / tooling
 .pytest_cache/
