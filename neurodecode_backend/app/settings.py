@@ -38,6 +38,10 @@ class Settings:
     fcm_enabled: bool
     firestore_push_device_collection: str
 
+    moltbook_api_key: str | None
+    moltbook_heartbeat_interval_minutes: int
+    moltbook_enabled: bool
+
 
 def get_settings() -> Settings:
     # The Google GenAI SDK will auto-pick `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
@@ -116,6 +120,17 @@ def get_settings() -> Settings:
         "NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION", "push_device_tokens"
     )
 
+    moltbook_api_key = os.getenv("MOLTBOOK_API_KEY") or None
+    moltbook_heartbeat_interval_minutes = max(
+        5,
+        min(int(os.getenv("MOLTBOOK_HEARTBEAT_INTERVAL_MINUTES", "30")), 120),
+    )
+    moltbook_enabled = os.getenv("MOLTBOOK_ENABLED", "0").strip() not in {
+        "0",
+        "false",
+        "False",
+    }
+
     return Settings(
         gemini_api_key=gemini_api_key,
         live_model=live_model,
@@ -142,4 +157,7 @@ def get_settings() -> Settings:
         admin_debug_max_items=admin_debug_max_items,
         fcm_enabled=fcm_enabled,
         firestore_push_device_collection=firestore_push_device_collection,
+        moltbook_api_key=moltbook_api_key,
+        moltbook_heartbeat_interval_minutes=moltbook_heartbeat_interval_minutes,
+        moltbook_enabled=moltbook_enabled,
     )

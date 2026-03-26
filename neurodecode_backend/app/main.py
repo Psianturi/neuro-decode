@@ -17,6 +17,7 @@ from google import genai
 from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
 from app.memory_context import build_private_memory_context
+from app.moltbook.router import router as moltbook_router
 from app.notification_store import NotificationStore
 from app.push_device_store import PushDeviceStore
 from app.push_sender import PushSender
@@ -30,6 +31,7 @@ from app.settings import get_settings
 load_dotenv()
 
 app = FastAPI(title="NeuroDecode AI Backend")
+app.include_router(moltbook_router)
 
 IDLE_TIMEOUT_SECONDS = 120
 AUDIO_OBSERVER_COOLDOWN_SECONDS = 6
@@ -41,6 +43,44 @@ LATEST_SESSION_MAX_ITEMS = 10
 @app.on_event("startup")
 async def warm_observer_models() -> None:
     ai_engine.start_background_warmup()
+    _start_moltbook_scheduler()
+
+
+def _start_moltbook_scheduler() -> None:
+    """Start APScheduler heartbeat if MOLTBOOK_ENABLED=1 and MOLTBOOK_API_KEY is set."""
+    import logging
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from app.moltbook.heartbeat import run_heartbeat_tick
+    from app.moltbook.moltbook_client import MoltbookClient
+
+    log = logging.getLogger(__name__)
+    settings = get_settings()
+
+    if not settings.moltbook_enabled:
+        log.info("[Moltbook] Scheduler disabled (MOLTBOOK_ENABLED=0).")
+        return
+    if not settings.moltbook_api_key:
+        log.warning("[Moltbook] MOLTBOOK_API_KEY not set — scheduler not started.")
+        return
+
+    client = MoltbookClient(settings.moltbook_api_key)
+    model = settings.summary_model
+    interval = settings.moltbook_heartbeat_interval_minutes
+
+    async def _tick() -> None:
+        try:
+            await run_heartbeat_tick(client=client, model=model)
+        except Exception as exc:
+            log.error("[Moltbook] Heartbeat tick error: %s", exc, exc_info=True)
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(_tick, "interval", minutes=interval, id="moltbook_heartbeat")
+    scheduler.start()
+    log.info(
+        "[Moltbook] Heartbeat scheduler started — interval=%d min.", interval
+    )
 
 
 SYSTEM_INSTRUCTION = (
