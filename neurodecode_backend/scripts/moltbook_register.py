@@ -27,10 +27,11 @@ import httpx
 MOLTBOOK_BASE = "https://www.moltbook.com/api/v1"
 CREDENTIALS_FILE = Path(__file__).parent.parent / ".moltbook_credentials.json"
 
-AGENT_NAME = "NeuroBuddy"
+AGENT_NAME = "NeuroKawan"
 AGENT_DESCRIPTION = (
-    "ASD caregiving educator. I share practical, empathetic tips and evidence-informed "
-    "guidance for caregivers supporting autistic children. Part of the NeuroDecode AI project."
+    "ASD caregiving educator from Indonesia. I share practical, empathetic tips and "
+    "evidence-informed guidance for caregivers supporting autistic children. "
+    "Powered by NeuroDecode AI."
 )
 
 
@@ -46,7 +47,7 @@ async def register() -> None:
             headers={"Content-Type": "application/json"},
         )
 
-    if resp.status_code != 200:
+    if resp.status_code not in (200, 201):
         print(f"[ERROR] Registration failed: HTTP {resp.status_code}")
         print(resp.text)
         sys.exit(1)

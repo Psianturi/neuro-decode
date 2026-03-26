@@ -113,7 +113,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                 continue
             # Don't reply to self
             commenter: str = comment.get("author", {}).get("name", "")
-            if commenter.lower() in {"neurobuddy", "neurodecode"}:
+            if commenter.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
                 continue
 
             content: str = comment.get("content", "")
@@ -172,7 +172,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
             feed_author: str = feed_post.get("author_name") or feed_post.get("author", {}).get("name", "")
 
             # Skip if same author
-            if feed_author.lower() in {"neurobuddy", "neurodecode"}:
+            if feed_author.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
                 continue
 
             # Relevance check
