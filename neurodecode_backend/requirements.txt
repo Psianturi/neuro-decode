@@ -12,4 +12,3 @@ numpy==1.26.4
 google-cloud-firestore==2.14.0
 firebase-admin==6.5.0
 httpx==0.28.1
-apscheduler==3.10.4
