@@ -41,6 +41,8 @@ class Settings:
     moltbook_api_key: str | None
     moltbook_heartbeat_interval_minutes: int
     moltbook_enabled: bool
+    moltbook_firestore_enabled: bool
+    moltbook_agent_audit_enabled: bool
 
 
 def get_settings() -> Settings:
@@ -130,6 +132,16 @@ def get_settings() -> Settings:
         "false",
         "False",
     }
+    moltbook_firestore_enabled = os.getenv("MOLTBOOK_FIRESTORE_ENABLED", "0").strip() not in {
+        "0",
+        "false",
+        "False",
+    }
+    moltbook_agent_audit_enabled = os.getenv("MOLTBOOK_AGENT_AUDIT_ENABLED", "0").strip() not in {
+        "0",
+        "false",
+        "False",
+    }
 
     return Settings(
         gemini_api_key=gemini_api_key,
@@ -160,4 +172,6 @@ def get_settings() -> Settings:
         moltbook_api_key=moltbook_api_key,
         moltbook_heartbeat_interval_minutes=moltbook_heartbeat_interval_minutes,
         moltbook_enabled=moltbook_enabled,
+        moltbook_firestore_enabled=moltbook_firestore_enabled,
+        moltbook_agent_audit_enabled=moltbook_agent_audit_enabled,
     )

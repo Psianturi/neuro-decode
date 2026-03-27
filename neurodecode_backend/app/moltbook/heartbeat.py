@@ -30,6 +30,7 @@ from app.moltbook.persona import (
     is_relevant_post,
     pick_next_topic,
 )
+from app.moltbook.agents.orchestrator import AgentOrchestrator, PipelineContext
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,11 @@ async def _run_onboarding(client: MoltbookClient, model: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
+async def run_heartbeat_tick(
+    client: MoltbookClient,
+    model: str,
+    orchestrator: AgentOrchestrator | None = None,
+) -> dict:
     """
     Execute one heartbeat cycle. Returns a summary dict for logging.
     """
@@ -273,6 +278,18 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
     }
 
     logger.info("[Moltbook] Heartbeat cycle %d starting", cycle)
+
+    # ------------------------------------------------------------------
+    # 0a. Run multi-agent context pipeline (non-blocking on failure)
+    # ------------------------------------------------------------------
+    pipeline_ctx: PipelineContext | None = None
+    if orchestrator is not None:
+        try:
+            pipeline_ctx = await orchestrator.run_context_pipeline()
+            if pipeline_ctx.errors:
+                logger.warning("[Moltbook] Pipeline errors: %s", pipeline_ctx.errors)
+        except Exception as exc:
+            logger.warning("[Moltbook] Agent pipeline failed: %s", exc)
 
     # ------------------------------------------------------------------
     # 0. One-time onboarding: subscribe to submolts + post introduction
@@ -490,11 +507,42 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
         # else: hours_since_post stays 0.0 → skip post this cycle
 
     if hours_since_post >= _POST_INTERVAL_HOURS:
-        topic = pick_next_topic(_state["post_count"])
+        # Use insight from pipeline if available, else fall back to topic rotation
+        if pipeline_ctx is not None and pipeline_ctx.insight is not None:
+            topic = pipeline_ctx.insight.topic
+            submolt = pipeline_ctx.insight.suggested_submolt
+        else:
+            topic = pick_next_topic(_state["post_count"])
+            submolt = "general"
         try:
-            title, body = await generate_post(topic=topic, model=model)
+            title, body = await generate_post(
+                topic=topic,
+                model=model,
+                insight=pipeline_ctx.insight if pipeline_ctx else None,
+                persona_system_addendum=pipeline_ctx.persona_system_addendum if pipeline_ctx else "",
+            )
+            # ReviewAgent quality gate
+            if orchestrator is not None and pipeline_ctx is not None:
+                verdict = await orchestrator.review_draft(
+                    pipeline_ctx=pipeline_ctx,
+                    title=title,
+                    body=body,
+                    submolt=submolt,
+                )
+                if not verdict.approved:
+                    logger.warning("[Moltbook] Post rejected by ReviewAgent: %s", verdict.reason)
+                    summary["errors"].append(f"review_rejected: {verdict.reason}")
+                    # Skip publish this cycle
+                    summary["hours_since_last_post"] = round(hours_since_post, 1)
+                    return summary
+                # Apply reviewer revisions if any
+                if verdict.revised_title:
+                    title = verdict.revised_title
+                if verdict.revised_body:
+                    body = verdict.revised_body
+
             resp = await client.create_post(
-                submolt_name="general",
+                submolt_name=submolt,
                 title=title,
                 content=body,
             )

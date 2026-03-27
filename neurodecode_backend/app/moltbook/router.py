@@ -17,6 +17,7 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 
+from app.moltbook.agents.orchestrator import AgentOrchestrator
 from app.moltbook.challenge_solver import handle_verification
 from app.moltbook.heartbeat import get_state_snapshot, increment_post_count, run_heartbeat_tick
 from app.moltbook.moltbook_client import MoltbookClient, register_agent
@@ -149,7 +150,8 @@ async def moltbook_heartbeat_run(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """Manually trigger one heartbeat cycle. Admin only."""
-    summary = await run_heartbeat_tick(client=client, model=settings.summary_model)
+    orchestrator = _build_orchestrator(settings)
+    summary = await run_heartbeat_tick(client=client, model=settings.summary_model, orchestrator=orchestrator)
     return {"status": "ok", "summary": summary}
 
 
@@ -191,3 +193,15 @@ async def moltbook_manual_post(
             or resp.get("id")
         ),
     }
+
+
+def _build_orchestrator(settings: Settings) -> AgentOrchestrator | None:
+    """Build orchestrator if Moltbook Firestore is enabled."""
+    if not settings.moltbook_firestore_enabled:
+        return None
+    return AgentOrchestrator(
+        model=settings.summary_model,
+        firestore_project=settings.firestore_project,
+        sessions_collection=settings.firestore_collection,
+        persist_audit=settings.moltbook_agent_audit_enabled,
+    )

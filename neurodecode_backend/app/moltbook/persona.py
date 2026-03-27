@@ -121,14 +121,34 @@ def _text_model(settings_model: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def generate_post(topic: str, model: str) -> tuple[str, str]:
+async def generate_post(
+    topic: str,
+    model: str,
+    insight: "CommunityInsight | None" = None,
+    persona_system_addendum: str = "",
+) -> tuple[str, str]:
     """
     Returns (title, body) for a new educational post on Moltbook.
+
+    If insight is provided (from CreatorAgent), the post is grounded in
+    real anonymized session patterns and written from the selected persona.
     """
     from datetime import date
     today = date.today().strftime("%B %Y")
+
+    if insight is not None:
+        context_block = (
+            f"Community insight derived from recent anonymized caregiving sessions:\n"
+            f"- Topic: {insight.topic}\n"
+            f"- Angle: {insight.angle}\n"
+            f"- Evidence: {insight.evidence_summary}\n\n"
+        )
+    else:
+        context_block = ""
+
     prompt = (
         f"Today is {today}. Write an original, insightful post on this topic: {topic}.\n"
+        f"{context_block}"
         "Requirements:\n"
         "- Bring a specific, fresh angle — not generic advice people have heard a hundred times.\n"
         "- If relevant, reference real people, recent trends, or concrete examples.\n"
@@ -139,13 +159,18 @@ async def generate_post(topic: str, model: str) -> tuple[str, str]:
         "  Line 3+: BODY (180–300 words, plain paragraphs, no headers, no bullet lists)\n"
     )
 
+    system = (
+        EDUCATOR_SYSTEM_PROMPT
+        + (f"\n\n{persona_system_addendum}" if persona_system_addendum else "")
+    )
+
     client = _get_client()
     response = await asyncio.to_thread(
         client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
-            system_instruction=EDUCATOR_SYSTEM_PROMPT,
+            system_instruction=system,
             temperature=0.75,
             max_output_tokens=512,
         ),
