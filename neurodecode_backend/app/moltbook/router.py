@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from app.moltbook.agents.orchestrator import AgentOrchestrator
 from app.moltbook.challenge_solver import handle_verification
-from app.moltbook.heartbeat import get_state_snapshot, increment_post_count, run_heartbeat_tick
+from app.moltbook.heartbeat import get_last_pipeline_result, get_state_snapshot, increment_post_count, run_heartbeat_tick
 from app.moltbook.moltbook_client import MoltbookClient, register_agent
 from app.moltbook.persona import generate_post, pick_next_topic
 from app.settings import Settings, get_settings
@@ -153,6 +153,20 @@ async def moltbook_heartbeat_run(
     orchestrator = _build_orchestrator(settings)
     summary = await run_heartbeat_tick(client=client, model=settings.summary_model, orchestrator=orchestrator)
     return {"status": "ok", "summary": summary}
+
+
+@router.get("/pipeline/last")
+async def moltbook_pipeline_last(
+    _: None = Depends(_require_admin),
+) -> dict:
+    """Return the last multi-agent pipeline result. Admin only."""
+    result = get_last_pipeline_result()
+    if result is None:
+        return {
+            "status": "empty",
+            "message": "No pipeline run yet this process lifetime. Trigger a heartbeat first.",
+        }
+    return {"status": "ok", "pipeline": result}
 
 
 @router.get("/heartbeat/state")

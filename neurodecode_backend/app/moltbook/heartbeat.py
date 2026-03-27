@@ -54,6 +54,7 @@ _state: dict[str, Any] = {
     "followed_agents": set(),           # agent names we've already followed
     "upvoted_comment_ids": set(),       # comment IDs already upvoted
     "upvoted_post_ids": set(),           # post IDs already upvoted
+    "last_pipeline_result": None,        # last pipeline summary for /pipeline/last endpoint
 }
 
 # Submolts to subscribe to on first run
@@ -290,6 +291,21 @@ async def run_heartbeat_tick(
                 logger.warning("[Moltbook] Pipeline errors: %s", pipeline_ctx.errors)
         except Exception as exc:
             logger.warning("[Moltbook] Agent pipeline failed: %s", exc)
+            pipeline_ctx = None
+
+    # Store pipeline result for debug endpoint (always, even if no insight)
+    if pipeline_ctx is not None:
+        _state["last_pipeline_result"] = {
+            "cycle": cycle,
+            "timestamp_utc": _state["last_check_utc"],
+            "has_session_data": pipeline_ctx.session_ctx.has_data,
+            "session_count": pipeline_ctx.session_ctx.session_count,
+            "insight_topic": pipeline_ctx.insight.topic if pipeline_ctx.insight else None,
+            "insight_angle": pipeline_ctx.insight.angle if pipeline_ctx.insight else None,
+            "persona": pipeline_ctx.insight.persona_key if pipeline_ctx.insight else None,
+            "suggested_submolt": pipeline_ctx.insight.suggested_submolt if pipeline_ctx.insight else None,
+            "pipeline_errors": pipeline_ctx.errors,
+        }
 
     # ------------------------------------------------------------------
     # 0. One-time onboarding: subscribe to submolts + post introduction
@@ -532,7 +548,11 @@ async def run_heartbeat_tick(
                 if not verdict.approved:
                     logger.warning("[Moltbook] Post rejected by ReviewAgent: %s", verdict.reason)
                     summary["errors"].append(f"review_rejected: {verdict.reason}")
-                    # Skip publish this cycle
+                    if _state["last_pipeline_result"] is not None:
+                        _state["last_pipeline_result"]["post_published"] = False
+                        _state["last_pipeline_result"]["post_title"] = title
+                        _state["last_pipeline_result"]["review_verdict"] = "rejected"
+                        _state["last_pipeline_result"]["review_reason"] = verdict.reason
                     summary["hours_since_last_post"] = round(hours_since_post, 1)
                     return summary
                 # Apply reviewer revisions if any
@@ -551,6 +571,14 @@ async def run_heartbeat_tick(
                 _state["post_count"] += 1
                 _state["last_post_utc"] = now_utc.isoformat()
                 summary["post_created"] = True
+                summary["post_title"] = title
+                summary["post_topic"] = topic
+                summary["post_submolt"] = submolt
+                # Update pipeline result with publish outcome
+                if _state["last_pipeline_result"] is not None:
+                    _state["last_pipeline_result"]["post_published"] = True
+                    _state["last_pipeline_result"]["post_title"] = title
+                    _state["last_pipeline_result"]["review_verdict"] = "approved"
                 logger.info("[Moltbook] Post published: %s", title)
             else:
                 logger.warning("[Moltbook] Post verification failed: %s", resp)
@@ -595,22 +623,11 @@ def get_state_snapshot() -> dict:
     }
 
 
+def get_last_pipeline_result() -> dict | None:
+    """Return the last pipeline result for the debug endpoint."""
+    return _state.get("last_pipeline_result")
+
+
 def increment_post_count() -> None:
     """Increment post_count after a manual post succeeds (called by router)."""
     _state["post_count"] += 1
-    return {
-        "last_check_utc": _state["last_check_utc"],
-        "post_count": _state["post_count"],
-        "cycle_count": _state["cycle_count"],
-        "last_post_utc": _state.get("last_post_utc"),
-        "intro_posted": _state["intro_posted"],
-        "subscribed": _state["subscribed"],
-        "comments_today": _state["comments_today"],
-        "comments_today_budget": _MAX_COMMENTS_PER_DAY,
-        "replied_comment_ids_count": len(_state["replied_comment_ids"]),
-        "commented_post_ids_count": len(_state["commented_post_ids"]),
-        "followed_agents_count": len(_state["followed_agents"]),
-        "upvoted_comment_ids_count": len(_state["upvoted_comment_ids"]),
-        "upvoted_post_ids_count": len(_state["upvoted_post_ids"]),
-        "dm_requests_notified_count": len(_state["dm_request_ids_notified"]),
-    }
