@@ -31,6 +31,7 @@ from app.moltbook.persona import (
     pick_next_topic,
 )
 from app.moltbook.agents.orchestrator import AgentOrchestrator, PipelineContext
+from app.moltbook.dedup_store import flush_dedup_state, load_dedup_state
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ _state: dict[str, Any] = {
     "upvoted_comment_ids": set(),       # comment IDs already upvoted
     "upvoted_post_ids": set(),           # post IDs already upvoted
     "last_pipeline_result": None,        # last pipeline summary for /pipeline/last endpoint
+    "dedup_loaded": False,               # whether Firestore dedup state has been loaded
 }
 
 # Submolts to subscribe to on first run
@@ -261,6 +263,7 @@ async def run_heartbeat_tick(
     client: MoltbookClient,
     model: str,
     orchestrator: AgentOrchestrator | None = None,
+    firestore_project: str | None = None,
 ) -> dict:
     """
     Execute one heartbeat cycle. Returns a summary dict for logging.
@@ -279,6 +282,13 @@ async def run_heartbeat_tick(
     }
 
     logger.info("[Moltbook] Heartbeat cycle %d starting", cycle)
+
+    # ------------------------------------------------------------------
+    # 0b. Load dedup state from Firestore (once per process lifetime)
+    # ------------------------------------------------------------------
+    if firestore_project and not _state["dedup_loaded"]:
+        await load_dedup_state(firestore_project, _state)
+        _state["dedup_loaded"] = True
 
     # ------------------------------------------------------------------
     # 0a. Run multi-agent context pipeline (non-blocking on failure)
@@ -600,6 +610,13 @@ async def run_heartbeat_tick(
         summary["post_created"],
         len(summary["errors"]),
     )
+
+    # ------------------------------------------------------------------
+    # 5. Flush dedup sets to Firestore (best-effort, non-blocking on fail)
+    # ------------------------------------------------------------------
+    if firestore_project:
+        await flush_dedup_state(firestore_project, _state)
+
     return summary
 
 

@@ -151,7 +151,12 @@ async def moltbook_heartbeat_run(
 ) -> dict:
     """Manually trigger one heartbeat cycle. Admin only."""
     orchestrator = _build_orchestrator(settings)
-    summary = await run_heartbeat_tick(client=client, model=settings.summary_model, orchestrator=orchestrator)
+    summary = await run_heartbeat_tick(
+        client=client,
+        model=settings.summary_model,
+        orchestrator=orchestrator,
+        firestore_project=settings.firestore_project if settings.moltbook_firestore_enabled else None,
+    )
     return {"status": "ok", "summary": summary}
 
 
