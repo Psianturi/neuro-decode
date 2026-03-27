@@ -52,21 +52,22 @@ _state: dict[str, Any] = {
     "upvotes_by_author": {},            # author_name -> upvote count (for follow logic)
     "followed_agents": set(),           # agent names we've already followed
     "upvoted_comment_ids": set(),       # comment IDs already upvoted
+    "upvoted_post_ids": set(),           # post IDs already upvoted
 }
 
 # Submolts to subscribe to on first run
 _SUBMOLTS_TO_SUBSCRIBE = ["general", "introductions", "philosophy", "todayilearned", "ai"]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 8
-# Moltbook rule: max 50 comments/day (established agent). We cap at 30 for safety.
-_MAX_COMMENTS_PER_DAY = 30
+_POST_INTERVAL_HOURS = 7
+# Moltbook rule: max 50 comments/day (established agent). 
+_MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle
 _MAX_REPLIES_PER_CYCLE = 2
 # Max other agents' posts we'll comment on per cycle
 _MAX_EXTERNAL_COMMENTS_PER_CYCLE = 2
-# Moltbook rule: min 20s between comments (established). We use 22s for safety.
-_COMMENT_COOLDOWN_SECONDS = 22
+# Moltbook rule: min 20s between comments (established). We use 30s for safety.
+_COMMENT_COOLDOWN_SECONDS = 30
 # Follow a molty once we've upvoted this many of their posts
 _FOLLOW_UPVOTE_THRESHOLD = 3
 
@@ -409,11 +410,13 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
 
             if not relevant:
                 # Still upvote good posts silently
-                try:
-                    await client.upvote_post(feed_post_id)
-                    await _check_follow(feed_author, client)
-                except Exception:
-                    pass
+                if feed_post_id not in _state["upvoted_post_ids"]:
+                    try:
+                        await client.upvote_post(feed_post_id)
+                        _state["upvoted_post_ids"].add(feed_post_id)
+                        await _check_follow(feed_author, client)
+                    except Exception:
+                        pass
                 continue
 
             if not _can_comment():
@@ -435,6 +438,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                 ok = await handle_verification(resp, model, client)
                 if ok:
                     _state["commented_post_ids"].add(feed_post_id)
+                    _state["upvoted_post_ids"].add(feed_post_id)
                     _record_comment()
                     await client.upvote_post(feed_post_id)
                     await _check_follow(feed_author, client)
@@ -538,5 +542,27 @@ def get_state_snapshot() -> dict:
         "commented_post_ids_count": len(_state["commented_post_ids"]),
         "followed_agents_count": len(_state["followed_agents"]),
         "upvoted_comment_ids_count": len(_state["upvoted_comment_ids"]),
+        "upvoted_post_ids_count": len(_state["upvoted_post_ids"]),
+        "dm_requests_notified_count": len(_state["dm_request_ids_notified"]),
+    }
+
+
+def increment_post_count() -> None:
+    """Increment post_count after a manual post succeeds (called by router)."""
+    _state["post_count"] += 1
+    return {
+        "last_check_utc": _state["last_check_utc"],
+        "post_count": _state["post_count"],
+        "cycle_count": _state["cycle_count"],
+        "last_post_utc": _state.get("last_post_utc"),
+        "intro_posted": _state["intro_posted"],
+        "subscribed": _state["subscribed"],
+        "comments_today": _state["comments_today"],
+        "comments_today_budget": _MAX_COMMENTS_PER_DAY,
+        "replied_comment_ids_count": len(_state["replied_comment_ids"]),
+        "commented_post_ids_count": len(_state["commented_post_ids"]),
+        "followed_agents_count": len(_state["followed_agents"]),
+        "upvoted_comment_ids_count": len(_state["upvoted_comment_ids"]),
+        "upvoted_post_ids_count": len(_state["upvoted_post_ids"]),
         "dm_requests_notified_count": len(_state["dm_request_ids_notified"]),
     }

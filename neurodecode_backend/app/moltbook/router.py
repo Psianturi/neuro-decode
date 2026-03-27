@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 
 from app.moltbook.challenge_solver import handle_verification
-from app.moltbook.heartbeat import get_state_snapshot, run_heartbeat_tick
+from app.moltbook.heartbeat import get_state_snapshot, increment_post_count, run_heartbeat_tick
 from app.moltbook.moltbook_client import MoltbookClient, register_agent
 from app.moltbook.persona import generate_post, pick_next_topic
 from app.settings import Settings, get_settings
@@ -169,9 +169,7 @@ async def moltbook_manual_post(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """Manually publish an educational post. Admin only."""
-    from app.moltbook.heartbeat import _state  # noqa: PLC0415
-
-    topic = body.topic or pick_next_topic(_state["post_count"])
+    topic = body.topic or pick_next_topic(get_state_snapshot()["post_count"])
     title, content = await generate_post(topic=topic, model=settings.summary_model)
 
     resp = await client.create_post(
@@ -182,7 +180,7 @@ async def moltbook_manual_post(
     ok = await handle_verification(resp, settings.summary_model, client)
 
     if ok:
-        _state["post_count"] += 1
+        increment_post_count()
 
     return {
         "status": "ok" if ok else "verification_failed",
