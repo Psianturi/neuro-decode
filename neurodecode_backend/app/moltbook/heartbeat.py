@@ -5,8 +5,8 @@ Runs every 30 minutes (configurable via MOLTBOOK_HEARTBEAT_INTERVAL_MINUTES).
 Each cycle:
   1. GET /home — parse dashboard
   2. Reply to new comments on NeuroBuddy's own posts
-  3. Browse feed — upvote + comment on relevant ASD-related posts (max 3/cycle)
-  4. Possibly create a new educational post (rate: 1 per 4 cycles = ~2 hrs)
+  3. Browse feed — upvote + comment on relevant posts (max 1/cycle)
+  4. Possibly create a new educational post (rate: ~2–3 per day = every 8 hrs)
   5. Mark processed notifications as read
 
 State is stored in a simple in-memory dict (survives per-process restart).
@@ -57,10 +57,10 @@ _state: dict[str, Any] = {
 # Submolts to subscribe to on first run
 _SUBMOLTS_TO_SUBSCRIBE = ["general", "introductions", "philosophy", "todayilearned", "ai"]
 
-# Minimum hours between proactive posts (robust to cold start / state reset)
-_POST_INTERVAL_HOURS = 2
-# Moltbook rule: max 50 comments/day (established agent). We cap at 40 for safety.
-_MAX_COMMENTS_PER_DAY = 40
+# Minimum hours between proactive posts (API-guarded to survive cold start)
+_POST_INTERVAL_HOURS = 8
+# Moltbook rule: max 50 comments/day (established agent). We cap at 30 for safety.
+_MAX_COMMENTS_PER_DAY = 30
 # Max NEW comments from others we'll reply to per cycle
 _MAX_REPLIES_PER_CYCLE = 2
 # Max other agents' posts we'll comment on per cycle
@@ -457,14 +457,34 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
     summary["external_comments"] = external_comments
 
     # ------------------------------------------------------------------
-    # 4. Create a proactive educational post (time-based, robust to cold start)
+    # 4. Create a proactive educational post (API-guarded, cold-start safe)
     # ------------------------------------------------------------------
     now_utc = datetime.now(timezone.utc)
-    last_post = _state.get("last_post_utc")
-    hours_since_post = (
-        (now_utc - datetime.fromisoformat(last_post)).total_seconds() / 3600
-        if last_post else _POST_INTERVAL_HOURS + 1  # First run: always eligible
-    )
+
+    # Determine hours since last post via Moltbook API first.
+    # This survives cold starts where last_post_utc is always None.
+    hours_since_post: float = 0.0
+    try:
+        profile = await client.get_agent_profile("anakunggul")
+        recent = profile.get("recentPosts", [])
+        if recent:
+            latest_ts = max(
+                (p.get("created_at") or p.get("createdAt") or "") for p in recent
+            )
+            if latest_ts:
+                last_dt = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
+                hours_since_post = (now_utc - last_dt).total_seconds() / 3600
+                _state["last_post_utc"] = last_dt.isoformat()
+    except Exception as exc:
+        logger.warning("[Moltbook] Could not fetch profile for post timing: %s", exc)
+        # Fallback to in-memory; cold start with no info → conservative skip
+        last_post_mem = _state.get("last_post_utc")
+        if last_post_mem:
+            hours_since_post = (
+                now_utc - datetime.fromisoformat(last_post_mem)
+            ).total_seconds() / 3600
+        # else: hours_since_post stays 0.0 → skip post this cycle
+
     if hours_since_post >= _POST_INTERVAL_HOURS:
         topic = pick_next_topic(_state["post_count"])
         try:
