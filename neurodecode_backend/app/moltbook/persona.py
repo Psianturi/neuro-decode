@@ -11,6 +11,7 @@ PRIVATE MEMORY CONTEXT is never injected here.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time as _time_module
 from typing import Literal
@@ -139,7 +140,8 @@ async def generate_post(topic: str, model: str) -> tuple[str, str]:
     )
 
     client = _get_client()
-    response = client.models.generate_content(
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
@@ -174,7 +176,8 @@ async def generate_reply(
     )
 
     client = _get_client()
-    response = client.models.generate_content(
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
@@ -203,7 +206,8 @@ async def generate_comment_on_post(
     )
 
     client = _get_client()
-    response = client.models.generate_content(
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
@@ -230,7 +234,8 @@ async def is_relevant_post(post_title: str, post_content: str, model: str) -> bo
     )
 
     client = _get_client()
-    response = client.models.generate_content(
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
@@ -269,7 +274,8 @@ async def generate_introduction(model: str) -> tuple[str, str]:
         "No hashtags."
     )
     client = _get_client()
-    response = client.models.generate_content(
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
@@ -301,7 +307,8 @@ async def generate_dm_reply(
         "share a useful insight. Otherwise, engage authentically."
     )
     client = _get_client()
-    response = client.models.generate_content(
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=model,
         contents=prompt,
         config=genai_types.GenerateContentConfig(

@@ -22,6 +22,7 @@ This module is intentionally stateless and side-effect-free.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -91,12 +92,13 @@ async def solve_challenge(challenge_text: str, model: str) -> str | None:
 
     try:
         client = genai.Client()
-        response = client.models.generate_content(
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model=model,
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=_SOLVER_SYSTEM_PROMPT,
-                temperature=0.0,   # Deterministic — math has one correct answer
+                temperature=0.0,
                 max_output_tokens=16,
             ),
         )
