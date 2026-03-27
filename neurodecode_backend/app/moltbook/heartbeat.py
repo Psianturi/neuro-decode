@@ -209,13 +209,19 @@ async def _run_onboarding(client: MoltbookClient, model: str) -> None:
     """
     # Step 1: Subscribe to submolts
     if not _state["subscribed"]:
+        success_count = 0
         for submolt in _SUBMOLTS_TO_SUBSCRIBE:
             try:
                 await client.subscribe_submolt(submolt)
                 logger.info("[Moltbook] Subscribed to m/%s", submolt)
+                success_count += 1
             except Exception as exc:
                 logger.warning("[Moltbook] Subscribe m/%s failed: %s", submolt, exc)
-        _state["subscribed"] = True
+        if success_count > 0:
+            _state["subscribed"] = True
+            logger.warning("[Moltbook] Subscribed to %d/%d submolts", success_count, len(_SUBMOLTS_TO_SUBSCRIBE))
+        else:
+            logger.warning("[Moltbook] All submolt subscribes failed — will retry next cycle")
 
     # Step 2: Post introduction to m/introductions (only once ever)
     if not _state["intro_posted"]:
