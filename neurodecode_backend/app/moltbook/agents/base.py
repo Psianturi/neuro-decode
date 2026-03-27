@@ -26,7 +26,7 @@ class BaseAgent(ABC):
         """Process input message and return output message."""
 
     def log(self, msg: str, *args: Any) -> None:
-        self._log.info(f"[{self.name}] {msg}", *args)
+        self._log.warning(f"[{self.name}] {msg}", *args)
 
     def warn(self, msg: str, *args: Any) -> None:
-        self._log.warning(f"[{self.name}] {msg}", *args)
+        self._log.warning(f"[{self.name}] WARN: {msg}", *args)

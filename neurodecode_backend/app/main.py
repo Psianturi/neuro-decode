@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -42,6 +43,8 @@ LATEST_SESSION_MAX_ITEMS = 10
 
 @app.on_event("startup")
 async def warm_observer_models() -> None:
+    if os.getenv("NEURODECODE_DISABLE_AI_WARMUP", "0").strip() not in {"0", "false", "False"}:
+        return
     ai_engine.start_background_warmup()
 
 

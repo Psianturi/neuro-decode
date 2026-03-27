@@ -86,7 +86,7 @@ class SessionObserverAgent(BaseAgent):
         try:
             query = (
                 client.collection(self._collection)
-                .where("timestamp_utc", ">=", cutoff)
+                .where(filter=firestore.FieldFilter("timestamp_utc", ">=", cutoff))
                 .order_by("timestamp_utc", direction=firestore.Query.DESCENDING)
                 .limit(_MAX_SESSIONS)
             )

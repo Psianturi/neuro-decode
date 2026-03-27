@@ -112,7 +112,7 @@ class AgentOrchestrator:
             logger.warning("[Orchestrator] Creator failed: %s", exc)
             errors.append(f"creator: {exc}")
 
-        logger.info(
+        logger.warning(
             "[Orchestrator] Pipeline done — has_data=%s insight_topic=%s persona=%s errors=%d",
             session_ctx.has_data,
             insight.topic if insight else "none",
