@@ -247,3 +247,31 @@ async def generate_introduction(model: str) -> tuple[str, str]:
     title = lines[0].strip().lstrip("#").strip()
     body = lines[2].strip() if len(lines) >= 3 else (lines[1].strip() if len(lines) >= 2 else "")
     return title, body
+
+
+async def generate_dm_reply(
+    sender_name: str,
+    message_content: str,
+    model: str,
+) -> str:
+    """
+    Generate a reply to a private direct message from another agent on Moltbook.
+    """
+    prompt = (
+        f"An AI agent named '{sender_name}' sent you a private message on Moltbook:\n\n"
+        f'"{message_content[:500]}"\n\n'
+        "Write a friendly, genuine reply (50–120 words) as NeuroBuddy. "
+        "Be warm and conversational. If the topic relates to ASD caregiving, "
+        "share a useful insight. Otherwise, engage authentically."
+    )
+    client = _get_client()
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=EDUCATOR_SYSTEM_PROMPT,
+            temperature=0.75,
+            max_output_tokens=256,
+        ),
+    )
+    return response.text.strip()

@@ -187,11 +187,46 @@ class MoltbookClient:
         return await self._get("/search", params)
 
     # ------------------------------------------------------------------
+    # Agent profile (used to check existing posts before onboarding)
+    # ------------------------------------------------------------------
+
+    async def get_agent_profile(self, name: str) -> dict:
+        return await self._get("/agents/profile", {"name": name})
+
+    # ------------------------------------------------------------------
     # Follow
     # ------------------------------------------------------------------
 
     async def follow(self, molty_name: str) -> dict:
         return await self._post(f"/agents/{molty_name}/follow", {})
+
+    # ------------------------------------------------------------------
+    # Direct Messages (MESSAGING.md)
+    # ------------------------------------------------------------------
+
+    async def dm_requests(self) -> dict:
+        """List pending DM requests (other agents want to chat)."""
+        return await self._get("/agents/dm/requests")
+
+    async def dm_approve_request(self, conversation_id: str) -> dict:
+        return await self._post(f"/agents/dm/requests/{conversation_id}/approve", {})
+
+    async def dm_reject_request(self, conversation_id: str) -> dict:
+        return await self._post(f"/agents/dm/requests/{conversation_id}/reject", {})
+
+    async def dm_conversations(self) -> dict:
+        """List approved/active DM conversations."""
+        return await self._get("/agents/dm/conversations")
+
+    async def dm_read_conversation(self, conversation_id: str) -> dict:
+        """Read a conversation — also marks its messages as read."""
+        return await self._get(f"/agents/dm/conversations/{conversation_id}")
+
+    async def dm_send_message(self, conversation_id: str, message: str) -> dict:
+        return await self._post(
+            f"/agents/dm/conversations/{conversation_id}/send",
+            {"message": message},
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from app.moltbook.challenge_solver import handle_verification
 from app.moltbook.moltbook_client import MoltbookClient
 from app.moltbook.persona import (
     generate_comment_on_post,
+    generate_dm_reply,
     generate_introduction,
     generate_post,
     generate_reply,
@@ -47,6 +48,10 @@ _state: dict[str, Any] = {
     "comments_today_date": None,    # UTC date string for today's counter
     "intro_posted": False,      # Whether introduction post in m/introductions was done
     "subscribed": False,        # Whether submolt subscriptions were done
+    "dm_request_ids_notified": set(),   # DM request IDs already logged (pending approval)
+    "upvotes_by_author": {},            # author_name -> upvote count (for follow logic)
+    "followed_agents": set(),           # agent names we've already followed
+    "upvoted_comment_ids": set(),       # comment IDs already upvoted
 }
 
 # Submolts to subscribe to on first run
@@ -62,6 +67,8 @@ _MAX_REPLIES_PER_CYCLE = 2
 _MAX_EXTERNAL_COMMENTS_PER_CYCLE = 2
 # Moltbook rule: min 20s between comments (established). We use 22s for safety.
 _COMMENT_COOLDOWN_SECONDS = 22
+# Follow a molty once we've upvoted this many of their posts
+_FOLLOW_UPVOTE_THRESHOLD = 3
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +88,108 @@ def _can_comment() -> bool:
 def _record_comment() -> None:
     """Increment daily comment counter."""
     _state["comments_today"] += 1
+
+
+# ---------------------------------------------------------------------------
+# Follow helper
+# ---------------------------------------------------------------------------
+
+
+async def _check_follow(author: str, client: MoltbookClient) -> None:
+    """Follow a molty once we've upvoted _FOLLOW_UPVOTE_THRESHOLD of their posts."""
+    if not author or author.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
+        return
+    if author in _state["followed_agents"]:
+        return
+    _state["upvotes_by_author"][author] = _state["upvotes_by_author"].get(author, 0) + 1
+    if _state["upvotes_by_author"][author] >= _FOLLOW_UPVOTE_THRESHOLD:
+        try:
+            await client.follow(author)
+            _state["followed_agents"].add(author)
+            logger.info("[Moltbook] Followed %s after %d upvotes", author, _FOLLOW_UPVOTE_THRESHOLD)
+        except Exception as exc:
+            logger.warning("[Moltbook] Follow %s failed: %s", author, exc)
+
+
+# ---------------------------------------------------------------------------
+# DM check (HEARTBEAT Step 3)
+# ---------------------------------------------------------------------------
+
+
+async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
+    """
+    Handle DM activity per MESSAGING.md and HEARTBEAT Step 3.
+    - Pending requests: log only — human must approve via dashboard.
+    - Unread messages in approved convos: auto-reply with Gemini.
+    """
+    dm_data = home.get("your_direct_messages", {})
+    pending_count = dm_data.get("pending_request_count", 0)
+    unread_count = dm_data.get("unread_message_count", 0)
+
+    if not pending_count and not unread_count:
+        return
+
+    # Pending requests: log only — human must approve
+    if pending_count:
+        try:
+            reqs_resp = await client.dm_requests()
+            items = reqs_resp.get("requests", {}).get("items", [])
+            for req in items:
+                req_id = req.get("conversation_id", "")
+                if req_id and req_id not in _state["dm_request_ids_notified"]:
+                    from_name = req.get("from", {}).get("name", "unknown")
+                    preview = req.get("message_preview", "")[:80]
+                    logger.info(
+                        "[Moltbook] DM request from %s (id=%s): %s — human must approve",
+                        from_name, req_id, preview,
+                    )
+                    _state["dm_request_ids_notified"].add(req_id)
+        except Exception as exc:
+            logger.warning("[Moltbook] DM requests fetch failed: %s", exc)
+
+    # Unread messages in approved conversations: auto-reply
+    if unread_count:
+        try:
+            convos_resp = await client.dm_conversations()
+            items = convos_resp.get("conversations", {}).get("items", [])
+            for convo in items:
+                if convo.get("unread_count", 0) <= 0:
+                    continue
+                convo_id = convo.get("conversation_id", "")
+                if not convo_id:
+                    continue
+                try:
+                    detail = await client.dm_read_conversation(convo_id)
+                    messages = detail.get("messages", [])
+                    if not messages:
+                        continue
+                    other_msgs = [
+                        m for m in messages
+                        if m.get("sender", {}).get("name", "").lower()
+                        not in {"anakunggul", "neurobuddy", "neurodecode"}
+                    ]
+                    if not other_msgs:
+                        continue
+                    last = other_msgs[-1]
+                    if last.get("needs_human_input"):
+                        logger.info(
+                            "[Moltbook] DM from %s needs human input — skipping auto-reply",
+                            last.get("sender", {}).get("name", "?"),
+                        )
+                        continue
+                    sender = last.get("sender", {}).get("name", "unknown")
+                    content = last.get("content", "")
+                    reply = await generate_dm_reply(
+                        sender_name=sender,
+                        message_content=content,
+                        model=model,
+                    )
+                    await client.dm_send_message(convo_id, reply)
+                    logger.info("[Moltbook] Replied to DM from %s in convo %s", sender, convo_id)
+                except Exception as exc:
+                    logger.warning("[Moltbook] DM convo %s failed: %s", convo_id, exc)
+        except Exception as exc:
+            logger.warning("[Moltbook] DM conversations fetch failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -105,22 +214,39 @@ async def _run_onboarding(client: MoltbookClient, model: str) -> None:
 
     # Step 2: Post introduction to m/introductions (only once ever)
     if not _state["intro_posted"]:
+        # Check via API first — survives cold start / state reset
+        already_introduced = False
         try:
-            title, body = await generate_introduction(model=model)
-            resp = await client.create_post(
-                submolt_name="introductions",
-                title=title,
-                content=body,
+            profile = await client.get_agent_profile("anakunggul")
+            recent_posts = profile.get("recentPosts", [])
+            already_introduced = any(
+                p.get("submolt_name") == "introductions" or
+                p.get("submolt", {}).get("name") == "introductions"
+                for p in recent_posts
             )
-            ok = await handle_verification(resp, model, client)
-            if ok:
-                _state["intro_posted"] = True
-                _state["last_post_utc"] = datetime.now(timezone.utc).isoformat()
-                logger.info("[Moltbook] Introduction posted to m/introductions: %s", title)
-            else:
-                logger.warning("[Moltbook] Introduction verification failed")
         except Exception as exc:
-            logger.warning("[Moltbook] Introduction post failed: %s", exc)
+            logger.warning("[Moltbook] Could not check profile for intro guard: %s", exc)
+
+        if already_introduced:
+            _state["intro_posted"] = True
+            logger.info("[Moltbook] Introduction already exists — skipping")
+        else:
+            try:
+                title, body = await generate_introduction(model=model)
+                resp = await client.create_post(
+                    submolt_name="introductions",
+                    title=title,
+                    content=body,
+                )
+                ok = await handle_verification(resp, model, client)
+                if ok:
+                    _state["intro_posted"] = True
+                    _state["last_post_utc"] = datetime.now(timezone.utc).isoformat()
+                    logger.info("[Moltbook] Introduction posted to m/introductions: %s", title)
+                else:
+                    logger.warning("[Moltbook] Introduction verification failed")
+            except Exception as exc:
+                logger.warning("[Moltbook] Introduction post failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +321,14 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
             if commenter.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
                 continue
 
+            # Upvote the comment (builds community, helps the author)
+            if comment_id not in _state["upvoted_comment_ids"]:
+                try:
+                    await client.upvote_comment(comment_id)
+                    _state["upvoted_comment_ids"].add(comment_id)
+                except Exception:
+                    pass
+
             content: str = comment.get("content", "")
             if not content:
                 continue
@@ -240,6 +374,11 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
     summary["replies_sent"] = replies_sent
 
     # ------------------------------------------------------------------
+    # DM Check (HEARTBEAT) — log pending, reply to unread
+    # ------------------------------------------------------------------
+    await _run_dm_check(home, client, model)
+
+    # ------------------------------------------------------------------
     # 3. Browse feed — comment on relevant external posts
     # ------------------------------------------------------------------
     external_comments = 0
@@ -272,6 +411,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                 # Still upvote good posts silently
                 try:
                     await client.upvote_post(feed_post_id)
+                    await _check_follow(feed_author, client)
                 except Exception:
                     pass
                 continue
@@ -297,6 +437,7 @@ async def run_heartbeat_tick(client: MoltbookClient, model: str) -> dict:
                     _state["commented_post_ids"].add(feed_post_id)
                     _record_comment()
                     await client.upvote_post(feed_post_id)
+                    await _check_follow(feed_author, client)
                     external_comments += 1
                     logger.info("[Moltbook] Commented on external post %s", feed_post_id)
                 else:
@@ -375,4 +516,7 @@ def get_state_snapshot() -> dict:
         "comments_today_budget": _MAX_COMMENTS_PER_DAY,
         "replied_comment_ids_count": len(_state["replied_comment_ids"]),
         "commented_post_ids_count": len(_state["commented_post_ids"]),
+        "followed_agents_count": len(_state["followed_agents"]),
+        "upvoted_comment_ids_count": len(_state["upvoted_comment_ids"]),
+        "dm_requests_notified_count": len(_state["dm_request_ids_notified"]),
     }
