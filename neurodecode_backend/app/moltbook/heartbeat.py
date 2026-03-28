@@ -295,6 +295,9 @@ async def run_heartbeat_tick(
     if firestore_project and not _state["dedup_loaded"]:
         await load_dedup_state(firestore_project, _state)
         _state["dedup_loaded"] = True
+        # WAL: flush immediately after load so Firestore reflects current state
+        # before any actions are taken — prevents duplicate actions if cycle crashes
+        await flush_dedup_state(firestore_project, _state)
 
     # ------------------------------------------------------------------
     # 0a. Run multi-agent context pipeline (non-blocking on failure)
