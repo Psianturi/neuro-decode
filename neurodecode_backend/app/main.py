@@ -20,6 +20,7 @@ from app.memory_context import build_private_memory_context
 from app.notification_store import NotificationStore
 from app.push_device_store import PushDeviceStore
 from app.push_sender import PushSender
+from app.followup_engine import process_pending_followups
 from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.rule_debug_store import RuleDebugStore
@@ -749,6 +750,30 @@ async def sessions_list(
     }
 
 
+@app.post("/sessions/process-followups")
+async def sessions_process_followups(
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not _is_admin_authorized(
+        admin_token_query=admin_token,
+        admin_token_header=x_admin_token,
+    ):
+        return {
+            "status": "forbidden",
+            "message": "Admin token required.",
+        }
+    result = await process_pending_followups(
+        session_store=session_store,
+        push_device_store=push_device_store,
+        push_sender=push_sender,
+        telegram_bot_token=_startup_settings.telegram_bot_token,
+        telegram_chat_id=_startup_settings.telegram_chat_id,
+        fcm_enabled=_startup_settings.fcm_enabled,
+    )
+    return {"status": "ok", **result}
+
+
 @app.get("/notifications")
 async def notifications_list(
     user_id: str | None = None,
@@ -1342,6 +1367,24 @@ async def ws_live(websocket: WebSocket) -> None:
                     )
                     if sent > 0:
                         print(f"[push] Sent proactive push to {sent} device(s)")
+
+                    # Schedule follow-up check-in if session severity warrants it
+                    top_severity = max(
+                        (_severity_rank(str(n.get("severity") or "info")) for n in notifications),
+                        default=0,
+                    )
+                    min_dur = settings.followup_min_duration_seconds
+                    if top_severity >= 2 and duration_seconds >= min_dur and user_id and profile_id:
+                        from datetime import timedelta
+                        followup_at = (
+                            datetime.now(timezone.utc)
+                            + timedelta(hours=settings.followup_delay_hours)
+                        ).isoformat()
+                        await session_store.schedule_followup(session_id, followup_at)
+                        print(
+                            f"[followup] Scheduled check-in at {followup_at} "
+                            f"for session_id={session_id} severity={top_severity}"
+                        )
             except Exception as e:
                 print(f"[notifications] Rule generation failed: {e}")
 

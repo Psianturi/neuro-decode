@@ -188,3 +188,86 @@ class SessionStore:
                 if self._matches_scope(item, user_id=user_id, profile_id=profile_id)
             ]
             return items[:limit]
+
+    def _schedule_followup_firestore(
+        self,
+        doc_id: str,
+        followup_scheduled_at: str,
+    ) -> None:
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("Firestore client unavailable")
+        client.collection(self._firestore_collection).document(doc_id).set(
+            {"followup_scheduled_at": followup_scheduled_at, "followup_sent": False},
+            merge=True,
+        )
+
+    async def schedule_followup(self, doc_id: str, followup_scheduled_at: str) -> None:
+        """Set followup_scheduled_at on a session document (atomic merge, no overwrite)."""
+        if not self._firestore_enabled:
+            return
+        try:
+            await asyncio.to_thread(
+                self._schedule_followup_firestore, doc_id, followup_scheduled_at
+            )
+        except Exception as e:
+            print(f"[session_store] schedule_followup failed: {e}")
+
+    def _fetch_pending_followups_firestore(self, now_iso: str) -> list[tuple[str, dict[str, object]]]:
+        """Return (doc_id, record) for sessions where followup is due and not yet sent."""
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("Firestore client unavailable")
+        query = (
+            client.collection(self._firestore_collection)
+            .where("followup_sent", "==", False)
+            .where("followup_scheduled_at", "<=", now_iso)
+            .limit(20)
+        )
+        out: list[tuple[str, dict[str, object]]] = []
+        for doc in query.stream():
+            item = dict(doc.to_dict() or {})
+            item["id"] = doc.id
+            out.append((doc.id, item))
+        return out
+
+    def _mark_followup_sent_firestore(self, doc_id: str, sent_at: str) -> bool:
+        """Atomic conditional update — only marks sent if followup_sent is still False."""
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("Firestore client unavailable")
+        doc_ref = client.collection(self._firestore_collection).document(doc_id)
+
+        @firestore.transactional
+        def _txn(transaction):
+            snapshot = doc_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            data = snapshot.to_dict() or {}
+            if data.get("followup_sent") is True:
+                return False  # already sent by another instance
+            transaction.update(doc_ref, {"followup_sent": True, "followup_sent_at": sent_at})
+            return True
+
+        txn = client.transaction()
+        return _txn(txn)
+
+    async def scan_pending_followups(self, now_iso: str) -> list[tuple[str, dict[str, object]]]:
+        """Return pending followup sessions due by now_iso."""
+        if not self._firestore_enabled:
+            return []
+        try:
+            return await asyncio.to_thread(self._fetch_pending_followups_firestore, now_iso)
+        except Exception as e:
+            print(f"[session_store] scan_pending_followups failed: {e}")
+            return []
+
+    async def mark_followup_sent(self, doc_id: str, sent_at: str) -> bool:
+        """Atomically mark a session followup as sent. Returns False if already sent."""
+        if not self._firestore_enabled:
+            return False
+        try:
+            return await asyncio.to_thread(self._mark_followup_sent_firestore, doc_id, sent_at)
+        except Exception as e:
+            print(f"[session_store] mark_followup_sent failed: {e}")
+            return False

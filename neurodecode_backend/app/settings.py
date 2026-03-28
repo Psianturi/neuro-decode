@@ -37,6 +37,8 @@ class Settings:
 
     fcm_enabled: bool
     firestore_push_device_collection: str
+    followup_delay_hours: int
+    followup_min_duration_seconds: int
 
 
 def get_settings() -> Settings:
@@ -115,6 +117,12 @@ def get_settings() -> Settings:
     firestore_push_device_collection = os.getenv(
         "NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION", "push_device_tokens"
     )
+    followup_delay_hours = max(
+        1, min(int(os.getenv("NEURODECODE_FOLLOWUP_DELAY_HOURS", "4")), 48)
+    )
+    followup_min_duration_seconds = max(
+        60, min(int(os.getenv("NEURODECODE_FOLLOWUP_MIN_DURATION_SECONDS", "600")), 7200)
+    )
 
     return Settings(
         gemini_api_key=gemini_api_key,
@@ -142,4 +150,6 @@ def get_settings() -> Settings:
         admin_debug_max_items=admin_debug_max_items,
         fcm_enabled=fcm_enabled,
         firestore_push_device_collection=firestore_push_device_collection,
+        followup_delay_hours=followup_delay_hours,
+        followup_min_duration_seconds=followup_min_duration_seconds,
     )
