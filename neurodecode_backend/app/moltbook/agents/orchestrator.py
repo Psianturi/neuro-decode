@@ -77,10 +77,15 @@ class AgentOrchestrator:
         self._creator = CreatorAgent(model=model)
         self._reviewer = ReviewAgent(model=model)
 
-    async def run_context_pipeline(self) -> PipelineContext:
+    async def run_context_pipeline(
+        self,
+        moltbook_client: Any = None,
+        post_count: int = 0,
+    ) -> PipelineContext:
         """
         Run SessionObserver → Creator.
-        Returns PipelineContext for heartbeat to use during post generation.
+        moltbook_client: optional MoltbookClient to fetch recent post titles for topic diversity.
+        post_count: current post count for persona rotation.
         """
         errors: list[str] = []
 
@@ -101,11 +106,22 @@ class AgentOrchestrator:
                 has_data=False,
             )
 
+        # Step 1b: Fetch recent post titles from Moltbook for topic diversity
+        if moltbook_client is not None:
+            try:
+                profile = await moltbook_client.get_agent_profile("anakunggul")
+                recent_posts = profile.get("recentPosts", [])
+                titles = [p.get("title", "") for p in recent_posts[:6] if p.get("title")]
+                session_ctx = session_ctx.model_copy(update={"recent_post_titles": titles})
+                logger.warning("[Orchestrator] Loaded %d recent post titles for diversity", len(titles))
+            except Exception as exc:
+                logger.warning("[Orchestrator] Could not fetch recent posts for diversity: %s", exc)
+
         # Step 2: Creator selects persona + derives insight
         insight: CommunityInsight | None = None
         persona_addendum = ""
         try:
-            insight = await self._creator.run(session_ctx)
+            insight = await self._creator.run(session_ctx, post_count=post_count)
             await self._audit("Creator", "Heartbeat", "CommunityInsight", insight)
             persona_addendum = PERSONA_REGISTRY[insight.persona_key]["system_addendum"]
         except Exception as exc:

@@ -25,6 +25,8 @@ class SessionContext(BaseModel):
     # Dominant topic hint for post generation
     dominant_topic_hint: str | None     # e.g. "sensory overload during mealtimes"
     has_data: bool                      # False if Firestore unavailable or no sessions
+    # Recent Moltbook post titles — used by CreatorAgent to avoid topic repetition
+    recent_post_titles: list[str] = []  # last N post titles published by anakunggul
 
 
 class CommunityInsight(BaseModel):

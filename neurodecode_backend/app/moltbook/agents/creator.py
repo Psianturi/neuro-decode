@@ -105,21 +105,27 @@ PERSONA_REGISTRY: dict[str, dict[str, Any]] = {
 _DEFAULT_PERSONA = "parent_peer"
 
 
-def _pick_persona_for_context(ctx: SessionContext) -> str:
-    """Heuristic: pick persona based on dominant trigger type in session data."""
-    if not ctx.has_data:
-        return _DEFAULT_PERSONA
-
+def _pick_persona_for_context(ctx: SessionContext, post_count: int = 0) -> str:
+    """Pick persona based on session data. Rotates across all 5 personas when data is thin."""
     hint = (ctx.dominant_topic_hint or "").lower()
-    if "audio" in hint or "sound" in hint or "noise" in hint:
-        return "sensory_specialist"
-    if "visual" in hint or "light" in hint or "crowd" in hint:
-        return "sensory_specialist"
-    if "school" in hint or "iep" in hint or "transition" in hint:
-        return "iep_advocate"
-    if "burnout" in hint or "caregiver" in hint:
-        return "parent_peer"
-    return _DEFAULT_PERSONA
+
+    # If session data has clear trigger signals, use them
+    if hint:
+        if "audio" in hint or "sound" in hint or "noise" in hint:
+            return "sensory_specialist"
+        if "visual" in hint or "light" in hint or "crowd" in hint:
+            return "sensory_specialist"
+        if "school" in hint or "iep" in hint or "transition" in hint:
+            return "iep_advocate"
+        if "burnout" in hint or "caregiver" in hint:
+            return "parent_peer"
+
+    # No strong signal — rotate across all personas using post_count + time bucket
+    # so each post cycle gets a different persona even with identical session data
+    import time
+    personas = list(PERSONA_REGISTRY.keys())
+    bucket = int(time.time() // (3600 * 7))  # changes every 7h (aligned with post interval)
+    return personas[(post_count + bucket) % len(personas)]
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +154,8 @@ class CreatorAgent(BaseAgent):
         super().__init__("Creator")
         self._model = model
 
-    async def run(self, message: SessionContext) -> CommunityInsight:
-        persona_key = _pick_persona_for_context(message)
+    async def run(self, message: SessionContext, post_count: int = 0) -> CommunityInsight:
+        persona_key = _pick_persona_for_context(message, post_count)
         persona = PERSONA_REGISTRY[persona_key]
 
         if message.has_data:
@@ -175,12 +181,22 @@ class CreatorAgent(BaseAgent):
         visual_summary = "; ".join(ctx.visual_trigger_patterns[:3]) or "none"
         follow_summary = "; ".join(ctx.common_follow_ups[:3]) or "none"
 
+        # Build topic avoidance block from recent post titles
+        avoid_block = ""
+        if ctx.recent_post_titles:
+            titles_str = ", ".join(f'"{t}"' for t in ctx.recent_post_titles[:5])
+            avoid_block = (
+                f"IMPORTANT: These topics were covered in recent posts — do NOT repeat them: {titles_str}.\n"
+                "Choose a genuinely different angle or topic.\n\n"
+            )
+
         prompt = (
             f"Recent caregiving session patterns (anonymized, {ctx.session_count} sessions, "
             f"last {ctx.hours_window}h):\n"
             f"- Audio trigger patterns: {audio_summary}\n"
             f"- Visual trigger patterns: {visual_summary}\n"
             f"- Common follow-up actions: {follow_summary}\n\n"
+            f"{avoid_block}"
             f"Persona writing this post: {persona['display_name']} "
             f"(focus: {', '.join(persona['focus_topics'][:3])})\n\n"
             "Identify the single most valuable community insight to share based on these patterns.\n"

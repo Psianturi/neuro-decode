@@ -302,7 +302,10 @@ async def run_heartbeat_tick(
     pipeline_ctx: PipelineContext | None = None
     if orchestrator is not None:
         try:
-            pipeline_ctx = await orchestrator.run_context_pipeline()
+            pipeline_ctx = await orchestrator.run_context_pipeline(
+                moltbook_client=client,
+                post_count=_state["post_count"],
+            )
             if pipeline_ctx.errors:
                 logger.warning("[Moltbook] Pipeline errors: %s", pipeline_ctx.errors)
         except Exception as exc:
