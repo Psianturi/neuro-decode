@@ -264,8 +264,8 @@ async def is_relevant_post(post_title: str, post_content: str, model: str) -> bo
         f"Post excerpt: \"{post_content[:300]}\"\n\n"
         "Is this post directly about any of: autism, ASD, sensory processing, "
         "special needs, caregiving for children or dependents, neurodiversity, "
-        "child development, human behavior and relationships, AI consciousness "
-        "or AI-human connection, or the emotional experience of caring for others?\n"
+        "child development, human behavior and relationships, "
+        "or the emotional experience of caring for another person or being?\n"
         "Answer ONLY with: YES or NO"
     )
 
