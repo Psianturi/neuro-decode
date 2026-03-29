@@ -101,9 +101,9 @@ class SessionStore:
 
         query = client.collection(self._firestore_collection)
         if user_id:
-            query = query.where("user_id", "==", user_id)
+            query = query.where(filter=firestore.FieldFilter("user_id", "==", user_id))
         if profile_id:
-            query = query.where("profile_id", "==", profile_id)
+            query = query.where(filter=firestore.FieldFilter("profile_id", "==", profile_id))
         query = query.order_by(
             "timestamp_utc", direction=firestore.Query.DESCENDING
         ).limit(limit)
