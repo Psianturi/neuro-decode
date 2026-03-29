@@ -84,10 +84,10 @@ class PushDeviceStore:
         if client is None:
             raise RuntimeError("Firestore client unavailable")
 
-        query = client.collection(self._device_collection).where("user_id", "==", user_id)
+        query = client.collection(self._device_collection).where(filter=firestore.FieldFilter("user_id", "==", user_id))
         if profile_id:
-            query = query.where("profile_id", "==", profile_id)
-        query = query.where("active", "==", True)  # noqa: E712
+            query = query.where(filter=firestore.FieldFilter("profile_id", "==", profile_id))
+        query = query.where(filter=firestore.FieldFilter("active", "==", True))
 
         out: list[dict[str, object]] = []
         for doc in query.stream():

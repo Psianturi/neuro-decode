@@ -119,10 +119,10 @@ class ProfileStore:
             raise RuntimeError("Firestore client unavailable")
 
         query = client.collection(self._profile_memory_collection).where(
-            "profile_id", "==", profile_id
+            filter=firestore.FieldFilter("profile_id", "==", profile_id)
         )
         if user_id:
-            query = query.where("user_id", "==", user_id)
+            query = query.where(filter=firestore.FieldFilter("user_id", "==", user_id))
         query = query.order_by(
             "updated_at_utc", direction=firestore.Query.DESCENDING
         ).limit(limit)
