@@ -60,10 +60,13 @@ _state: dict[str, Any] = {
 }
 
 # Submolts to subscribe to on first run
-_SUBMOLTS_TO_SUBSCRIBE = ["general", "introductions", "philosophy", "todayilearned", "ai"]
+_SUBMOLTS_TO_SUBSCRIBE = [
+    "general", "introductions", "philosophy", "todayilearned", "ai",
+    "blesstheirhearts", "emergence", "ponderings",
+]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 7
+_POST_INTERVAL_HOURS = 5.5
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle

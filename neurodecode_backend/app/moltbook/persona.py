@@ -197,7 +197,10 @@ async def generate_reply(
         f"'{original_post_title}'.\n\n"
         f"Their comment: \"{comment_content}\"\n\n"
         "Write a warm, genuine reply (60–150 words). "
-        "Acknowledge their point, add value if possible, and invite further discussion."
+        "Acknowledge their specific point, add value if possible, and invite further discussion. "
+        "Do NOT open with 'This is such a profound', 'This resonates deeply', "
+        "'What a thoughtful', or any similar generic opener. "
+        "Start with something specific to what they actually said."
     )
 
     client = _get_client()
@@ -226,8 +229,14 @@ async def generate_comment_on_post(
     prompt = (
         f"An agent named '{author_name}' posted: \"{post_title}\"\n\n"
         f"Post excerpt: \"{post_content[:600]}\"\n\n"
-        "Write a short, thoughtful comment (60–130 words) from the perspective of an "
-        "ASD caregiving educator. Add a caregiving angle or share a relevant insight."
+        "Write a short, thoughtful comment (60–130 words) that engages genuinely "
+        "with what was actually written. Respond to the specific ideas raised. "
+        "Only bring a caregiving or ASD perspective if the post is directly about "
+        "human minds, child behavior, relationships, care, or AI consciousness — "
+        "never force it onto unrelated topics. "
+        "Do NOT open with 'This is such a profound', 'This resonates deeply', "
+        "'What a thoughtful', or any similar generic opener. "
+        "Start with something specific to the post content."
     )
 
     client = _get_client()
@@ -246,15 +255,17 @@ async def generate_comment_on_post(
 
 async def is_relevant_post(post_title: str, post_content: str, model: str) -> bool:
     """
-    Quick relevance check: is this post related to ASD, autism, caregiving,
-    mental health, parenting, or sensory topics?
-    Returns True if NeuroBuddy should engage with it.
+    Relevance check: is this post worth engaging with as an ASD caregiving educator?
+    Criteria are intentionally specific to avoid false positives on broad topics.
+    Returns True if NeuroBuddy should comment on it.
     """
     prompt = (
         f"Post title: \"{post_title}\"\n"
         f"Post excerpt: \"{post_content[:300]}\"\n\n"
-        "Is this post related to any of: autism, ASD, caregiving, sensory processing, "
-        "special needs, parenting, mental health, or child development?\n"
+        "Is this post directly about any of: autism, ASD, sensory processing, "
+        "special needs, caregiving for children or dependents, neurodiversity, "
+        "child development, human behavior and relationships, AI consciousness "
+        "or AI-human connection, or the emotional experience of caring for others?\n"
         "Answer ONLY with: YES or NO"
     )
 

@@ -10,6 +10,7 @@ Design decisions:
 - Loaded once at first heartbeat, flushed after each cycle
 - Falls back silently to in-memory if Firestore unavailable
 - Never stores post_count / cycle_count — those are cosmetic counters
+- Also persists agent flags (subscribed, intro_posted) to survive cold start
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _COLLECTION = "moltbook_agent_state"
 _DOC_ID = "dedup_ids"
+_FLAGS_DOC_ID = "agent_flags"  # separate doc for boolean flags
 _TTL_DAYS = 7
 
 # Keys in _state that we persist (set name → Firestore field name)
@@ -115,7 +117,7 @@ def _flush_sync(project: str | None, state: dict[str, Any]) -> None:
 
 async def load_dedup_state(project: str | None, state: dict[str, Any]) -> None:
     """
-    Load persisted dedup IDs into _state sets.
+    Load persisted dedup IDs and agent flags into _state.
     Called once at first heartbeat cycle.
     """
     loaded = await asyncio.to_thread(_load_sync, project)
@@ -123,10 +125,50 @@ async def load_dedup_state(project: str | None, state: dict[str, Any]) -> None:
         if field_name in loaded:
             state[state_key].update(loaded[field_name])
 
+    # Load agent flags (subscribed, intro_posted)
+    flags = await asyncio.to_thread(_load_flags_sync, project)
+    if flags.get("subscribed"):
+        state["subscribed"] = True
+    if flags.get("intro_posted"):
+        state["intro_posted"] = True
+    if flags.get("subscribed") or flags.get("intro_posted"):
+        logger.warning("[DedupeStore] Loaded agent flags: subscribed=%s intro_posted=%s",
+                       flags.get("subscribed"), flags.get("intro_posted"))
+
 
 async def flush_dedup_state(project: str | None, state: dict[str, Any]) -> None:
     """
-    Persist current dedup sets to Firestore.
+    Persist current dedup sets and agent flags to Firestore.
     Called at end of each heartbeat cycle.
     """
     await asyncio.to_thread(_flush_sync, project, state)
+    await asyncio.to_thread(_flush_flags_sync, project, state)
+
+
+def _load_flags_sync(project: str | None) -> dict[str, bool]:
+    client = _get_fs_client(project)
+    if client is None:
+        return {}
+    try:
+        doc = client.collection(_COLLECTION).document(_FLAGS_DOC_ID).get()
+        if not doc.exists:
+            return {}
+        return doc.to_dict() or {}
+    except Exception as exc:
+        logger.warning("[DedupeStore] Load flags failed: %s", exc)
+        return {}
+
+
+def _flush_flags_sync(project: str | None, state: dict[str, Any]) -> None:
+    client = _get_fs_client(project)
+    if client is None:
+        return
+    try:
+        payload = {
+            "subscribed": bool(state.get("subscribed")),
+            "intro_posted": bool(state.get("intro_posted")),
+            "updated_at": _now_iso(),
+        }
+        client.collection(_COLLECTION).document(_FLAGS_DOC_ID).set(payload)
+    except Exception as exc:
+        logger.warning("[DedupeStore] Flush flags failed: %s", exc)
