@@ -69,7 +69,13 @@ class SessionStore:
         client = self._get_client()
         if client is None:
             raise RuntimeError("Firestore client unavailable")
-        client.collection(self._firestore_collection).add(record)
+        # Use session_id as Firestore document ID so doc_id == session_id everywhere.
+        # This allows schedule_followup to update by session_id directly.
+        session_id = str(record.get("session_id") or "")
+        if session_id:
+            client.collection(self._firestore_collection).document(session_id).set(record)
+        else:
+            client.collection(self._firestore_collection).add(record)
 
     def _write_firestore_events(self, records: list[dict[str, object]]) -> None:
         client = self._get_client()
@@ -220,8 +226,8 @@ class SessionStore:
             raise RuntimeError("Firestore client unavailable")
         query = (
             client.collection(self._firestore_collection)
-            .where("followup_sent", "==", False)
-            .where("followup_scheduled_at", "<=", now_iso)
+            .where(filter=firestore.FieldFilter("followup_sent", "==", False))
+            .where(filter=firestore.FieldFilter("followup_scheduled_at", "<=", now_iso))
             .limit(20)
         )
         out: list[tuple[str, dict[str, object]]] = []

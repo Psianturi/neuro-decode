@@ -33,6 +33,14 @@ venv/
 .idea/
 *.iml
 
+# Secrets / credentials
+**/*credentials*.json
+**/*service_account*.json
+**/*serviceaccount*.json
+**/google-services-dev.json
+.moltbook_credentials.json
+neurodecode_backend/.moltbook_credentials.json
+
 # OS
 .DS_Store
 Thumbs.db
