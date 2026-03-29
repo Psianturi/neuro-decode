@@ -80,7 +80,6 @@ class AgentOrchestrator:
     async def run_context_pipeline(
         self,
         moltbook_client: Any = None,
-        post_count: int = 0,
     ) -> PipelineContext:
         """
         Run SessionObserver → Creator.
@@ -121,7 +120,7 @@ class AgentOrchestrator:
         insight: CommunityInsight | None = None
         persona_addendum = ""
         try:
-            insight = await self._creator.run(session_ctx, post_count=post_count)
+            insight = await self._creator.run(session_ctx)
             await self._audit("Creator", "Heartbeat", "CommunityInsight", insight)
             persona_addendum = PERSONA_REGISTRY[insight.persona_key]["system_addendum"]
         except Exception as exc:

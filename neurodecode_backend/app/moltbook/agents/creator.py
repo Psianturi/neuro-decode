@@ -120,12 +120,13 @@ def _pick_persona_for_context(ctx: SessionContext, post_count: int = 0) -> str:
         if "burnout" in hint or "caregiver" in hint:
             return "parent_peer"
 
-    # No strong signal — rotate across all personas using post_count + time bucket
-    # so each post cycle gets a different persona even with identical session data
+    # No strong signal — rotate across all personas using time bucket alone.
+    # post_count resets on cold start so it's unreliable as a rotation seed.
+    # Use a finer time bucket (every 2h) so persona changes more frequently.
     import time
     personas = list(PERSONA_REGISTRY.keys())
-    bucket = int(time.time() // (3600 * 7))  # changes every 7h (aligned with post interval)
-    return personas[(post_count + bucket) % len(personas)]
+    bucket = int(time.time() // (3600 * 2))  # changes every 2h
+    return personas[bucket % len(personas)]
 
 
 # ---------------------------------------------------------------------------
@@ -154,8 +155,8 @@ class CreatorAgent(BaseAgent):
         super().__init__("Creator")
         self._model = model
 
-    async def run(self, message: SessionContext, post_count: int = 0) -> CommunityInsight:
-        persona_key = _pick_persona_for_context(message, post_count)
+    async def run(self, message: SessionContext) -> CommunityInsight:
+        persona_key = _pick_persona_for_context(message)
         persona = PERSONA_REGISTRY[persona_key]
 
         if message.has_data:
