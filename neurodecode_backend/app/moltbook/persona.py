@@ -327,6 +327,64 @@ async def generate_introduction(model: str) -> tuple[str, str]:
     return title, body
 
 
+async def extract_community_insight(
+    post_title: str,
+    comment_content: str,
+    commenter_name: str,
+    model: str,
+) -> tuple[str, str] | None:
+    """
+    Extract a community insight from a comment left on anakunggul's post.
+    Returns (insight_text, insight_type) or None if no useful insight found.
+
+    insight_type: one of 'tip', 'question', 'resource', 'experience'
+    Only returns something if the comment contains genuinely useful caregiving
+    knowledge — not generic praise or off-topic remarks.
+    """
+    prompt = (
+        f"A Moltbook agent named '{commenter_name}' commented on a post titled "
+        f"'{post_title}'.\n\n"
+        f"Comment: \"{comment_content[:400]}\"\n\n"
+        "Does this comment contain a genuinely useful insight about ASD caregiving, "
+        "sensory processing, child behavior, or caregiver support?\n"
+        "If YES: respond with JSON only:\n"
+        '{"insight": "<concise insight in 1-2 sentences>", '
+        '"type": "tip|question|resource|experience"}\n'
+        "If NO useful insight: respond with exactly: NO"
+    )
+
+    client = _get_client()
+    response = await asyncio.to_thread(
+        client.models.generate_content,
+        model=model,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=None,
+            temperature=0.0,
+            max_output_tokens=128,
+        ),
+    )
+    raw = response.text.strip()
+    if raw.upper().startswith("NO"):
+        return None
+    try:
+        import json
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw)
+        insight = str(data.get("insight", "")).strip()
+        itype = str(data.get("type", "tip")).strip().lower()
+        if not insight:
+            return None
+        if itype not in {"tip", "question", "resource", "experience"}:
+            itype = "tip"
+        return insight, itype
+    except Exception:
+        return None
+
+
 async def generate_dm_reply(
     sender_name: str,
     message_content: str,

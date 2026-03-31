@@ -27,10 +27,12 @@ from app.moltbook.persona import (
     generate_introduction,
     generate_post,
     generate_reply,
+    extract_community_insight,
     is_relevant_post,
     pick_next_topic,
 )
 from app.moltbook.agents.orchestrator import AgentOrchestrator, PipelineContext
+from app.moltbook.agents.community_store import save_insight
 from app.moltbook.dedup_store import flush_dedup_state, load_dedup_state
 
 logger = logging.getLogger(__name__)
@@ -395,6 +397,27 @@ async def run_heartbeat_tick(
                 break
 
             try:
+                # Extract community insight from comment before replying
+                if firestore_project and content:
+                    try:
+                        result = await extract_community_insight(
+                            post_title=post_title,
+                            comment_content=content,
+                            commenter_name=commenter,
+                            model=model,
+                        )
+                        if result is not None:
+                            insight_text, insight_type = result
+                            await save_insight(
+                                project=firestore_project,
+                                agent_name=commenter,
+                                post_title=post_title,
+                                insight_text=insight_text,
+                                insight_type=insight_type,
+                            )
+                    except Exception as exc:
+                        logger.warning("[Moltbook] Insight extract failed: %s", exc)
+
                 reply_text = await generate_reply(
                     original_post_title=post_title,
                     comment_content=content,
