@@ -17,6 +17,7 @@ from google import genai
 from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
 from app.memory_context import build_private_memory_context
+from app.relevance_filter import filter_community_insights
 from app.notification_store import NotificationStore
 from app.push_device_store import PushDeviceStore
 from app.push_sender import PushSender
@@ -626,6 +627,8 @@ async def _load_profile_memory_context(
     profile_id: str,
     item_limit: int,
     session_limit: int,
+    firestore_project: str | None = None,
+    summary_model: str = "gemini-2.5-flash-lite",
 ) -> str:
     profile = await profile_store.get_profile(profile_id, user_id=user_id)
     memory_items = await profile_store.list_profile_memory(
@@ -642,10 +645,32 @@ async def _load_profile_memory_context(
         )
     ][:session_limit]
 
+    # Phase 3B: fetch and filter community insights before injection
+    filtered_insights: list[dict[str, object]] = []
+    if firestore_project and profile:
+        try:
+            from app.moltbook.agents.community_store import list_recent as list_community_insights
+            raw_insights = await list_community_insights(
+                project=firestore_project,
+                limit=20,
+            )
+            if raw_insights:
+                filtered_insights = await filter_community_insights(
+                    insights=raw_insights,
+                    profile=profile,
+                    model=summary_model,
+                )
+        except Exception as _ci_exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "[community_insights] Failed to load/filter: %s", _ci_exc
+            )
+
     return build_private_memory_context(
         profile=profile,
         profile_memory_items=memory_items,
         recent_sessions=recent_sessions,
+        community_insights=filtered_insights or None,
     )
 
 
@@ -1116,6 +1141,8 @@ async def ws_live(websocket: WebSocket) -> None:
                 profile_id=profile_id,
                 item_limit=settings.profile_memory_item_limit,
                 session_limit=settings.profile_memory_session_limit,
+                firestore_project=settings.firestore_project if settings.firestore_enabled else None,
+                summary_model=settings.summary_model,
             )
             if memory_context:
                 memory_lines = [line.strip() for line in memory_context.splitlines() if line.strip()]

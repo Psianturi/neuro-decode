@@ -6,6 +6,7 @@ def build_private_memory_context(
     profile: dict[str, object] | None,
     profile_memory_items: list[dict[str, object]],
     recent_sessions: list[dict[str, object]],
+    community_insights: list[dict[str, object]] | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -56,6 +57,14 @@ def build_private_memory_context(
             if follow_up:
                 summary_bits.append(f"follow_up={follow_up}")
             lines.append("- " + " | ".join(summary_bits))
+
+    if community_insights:
+        lines.append("Community insights (peer caregivers & ASD educators — non-contradictory, pre-filtered):")
+        for item in community_insights:
+            text = str(item.get("insight_text") or "").strip()
+            itype = str(item.get("insight_type") or "tip").strip()
+            if text:
+                lines.append(f"- [{itype}] {text}")
 
     if not lines:
         return ""
