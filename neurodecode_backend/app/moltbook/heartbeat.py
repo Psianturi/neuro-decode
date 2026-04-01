@@ -558,7 +558,22 @@ async def run_heartbeat_tick(
             if latest_ts:
                 last_dt = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
                 hours_since_post = (now_utc - last_dt).total_seconds() / 3600
-                _state["last_post_utc"] = last_dt.isoformat()
+                # Only trust API value if it is more recent than what we already know from Firestore/in-memory. Moltbook API can have eventual-
+                # consistency lag: a just-published post may not appear in recentPosts for the next cycle, causing hours_since to be
+                # calculated from an older post and falsely exceeding the threshold → double post. We keep the more recent timestamp.
+                existing = _state.get("last_post_utc")
+                if existing:
+                    try:
+                        existing_dt = datetime.fromisoformat(existing)
+                        if last_dt > existing_dt:
+                            _state["last_post_utc"] = last_dt.isoformat()
+                        else:
+
+                            hours_since_post = (now_utc - existing_dt).total_seconds() / 3600
+                    except Exception:
+                        _state["last_post_utc"] = last_dt.isoformat()
+                else:
+                    _state["last_post_utc"] = last_dt.isoformat()
     except Exception as exc:
         logger.warning("[Moltbook] Could not fetch profile for post timing: %s", exc)
         # Fallback to in-memory; cold start with no info → conservative skip

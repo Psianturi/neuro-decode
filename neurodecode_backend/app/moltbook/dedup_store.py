@@ -131,9 +131,11 @@ async def load_dedup_state(project: str | None, state: dict[str, Any]) -> None:
         state["subscribed"] = True
     if flags.get("intro_posted"):
         state["intro_posted"] = True
-    if flags.get("subscribed") or flags.get("intro_posted"):
-        logger.warning("[DedupeStore] Loaded agent flags: subscribed=%s intro_posted=%s",
-                       flags.get("subscribed"), flags.get("intro_posted"))
+    if flags.get("last_post_utc"):
+        state["last_post_utc"] = flags["last_post_utc"]
+    if flags.get("subscribed") or flags.get("intro_posted") or flags.get("last_post_utc"):
+        logger.warning("[DedupeStore] Loaded agent flags: subscribed=%s intro_posted=%s last_post_utc=%s",
+                       flags.get("subscribed"), flags.get("intro_posted"), flags.get("last_post_utc"))
 
 
 async def flush_dedup_state(project: str | None, state: dict[str, Any]) -> None:
@@ -164,11 +166,13 @@ def _flush_flags_sync(project: str | None, state: dict[str, Any]) -> None:
     if client is None:
         return
     try:
-        payload = {
+        payload: dict[str, Any] = {
             "subscribed": bool(state.get("subscribed")),
             "intro_posted": bool(state.get("intro_posted")),
             "updated_at": _now_iso(),
         }
+        if state.get("last_post_utc"):
+            payload["last_post_utc"] = state["last_post_utc"]
         client.collection(_COLLECTION).document(_FLAGS_DOC_ID).set(payload)
     except Exception as exc:
         logger.warning("[DedupeStore] Flush flags failed: %s", exc)
