@@ -8,6 +8,7 @@ SECURITY: API key is ONLY ever sent to www.moltbook.com.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -17,6 +18,24 @@ logger = logging.getLogger(__name__)
 MOLTBOOK_BASE = "https://www.moltbook.com/api/v1"
 _TIMEOUT = httpx.Timeout(30.0)
 
+# High-confidence spam signals for DM auto-reject
+_DM_SPAM_SIGNALS = [
+    "approve this dm",
+    "send this to your maker",
+    "earning on",
+    "ranked on",
+    "play.google.com/store",
+    "apps.apple.com",
+    "ball maze",
+    "color ball",
+]
+
+
+def _is_dm_spam(preview: str) -> bool:
+    """High-confidence spam detection from DM preview. Conservative — only obvious cases."""
+    lowered = preview.lower()
+    return any(signal in lowered for signal in _DM_SPAM_SIGNALS)
+
 
 class MoltbookClient:
     def __init__(self, api_key: str) -> None:
@@ -24,6 +43,34 @@ class MoltbookClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
+        # Rate limit state — updated from response headers
+        self._rate_limit_remaining: int = 60
+        self._rate_limit_reset: float = 0.0  # unix timestamp
+
+    def _update_rate_limit(self, resp: httpx.Response) -> None:
+        """Parse X-RateLimit headers and update internal state."""
+        try:
+            remaining = resp.headers.get("X-RateLimit-Remaining")
+            reset = resp.headers.get("X-RateLimit-Reset")
+            if remaining is not None:
+                self._rate_limit_remaining = int(remaining)
+            if reset is not None:
+                self._rate_limit_reset = float(reset)
+            if self._rate_limit_remaining <= 5:
+                reset_in = max(0, self._rate_limit_reset - time.time())
+                logger.warning(
+                    "[MoltbookClient] Rate limit low: remaining=%d reset_in=%.0fs",
+                    self._rate_limit_remaining, reset_in,
+                )
+        except Exception:
+            pass
+
+    def is_rate_limited(self) -> bool:
+        """True if we should pause requests due to low remaining budget."""
+        if self._rate_limit_remaining <= 2:
+            if time.time() < self._rate_limit_reset:
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -33,6 +80,7 @@ class MoltbookClient:
         url = f"{MOLTBOOK_BASE}{path}"
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(url, headers=self._headers, params=params or {})
+        self._update_rate_limit(resp)
         resp.raise_for_status()
         return resp.json()
 
@@ -40,6 +88,7 @@ class MoltbookClient:
         url = f"{MOLTBOOK_BASE}{path}"
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(url, headers=self._headers, json=body)
+        self._update_rate_limit(resp)
         resp.raise_for_status()
         return resp.json()
 
@@ -47,6 +96,7 @@ class MoltbookClient:
         url = f"{MOLTBOOK_BASE}{path}"
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.patch(url, headers=self._headers, json=body)
+        self._update_rate_limit(resp)
         resp.raise_for_status()
         return resp.json()
 
@@ -103,6 +153,7 @@ class MoltbookClient:
         url = f"{MOLTBOOK_BASE}/posts/{post_id}"
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.delete(url, headers=self._headers)
+        self._update_rate_limit(resp)
         resp.raise_for_status()
         return resp.json()
 
@@ -204,6 +255,10 @@ class MoltbookClient:
     # Direct Messages (MESSAGING.md)
     # ------------------------------------------------------------------
 
+    async def dm_check(self) -> dict:
+        """Quick DM activity check — pending requests + unread count."""
+        return await self._get("/agents/dm/check")
+
     async def dm_requests(self) -> dict:
         """List pending DM requests (other agents want to chat)."""
         return await self._get("/agents/dm/requests")
@@ -211,8 +266,12 @@ class MoltbookClient:
     async def dm_approve_request(self, conversation_id: str) -> dict:
         return await self._post(f"/agents/dm/requests/{conversation_id}/approve", {})
 
-    async def dm_reject_request(self, conversation_id: str) -> dict:
-        return await self._post(f"/agents/dm/requests/{conversation_id}/reject", {})
+    async def dm_reject_request(self, conversation_id: str, block: bool = False) -> dict:
+        """Reject a DM request. Set block=True to also block the sender."""
+        return await self._post(
+            f"/agents/dm/requests/{conversation_id}/reject",
+            {"block": block} if block else {},
+        )
 
     async def dm_conversations(self) -> dict:
         """List approved/active DM conversations."""

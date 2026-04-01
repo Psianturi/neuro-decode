@@ -129,9 +129,11 @@ async def _check_follow(author: str, client: MoltbookClient) -> None:
 async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
     """
     Handle DM activity per MESSAGING.md and HEARTBEAT Step 3.
-    - Pending requests: log only — human must approve via dashboard.
+    - Pending requests: auto-reject high-confidence spam (with block), log others.
     - Unread messages in approved convos: auto-reply with Gemini.
     """
+    from app.moltbook.moltbook_client import _is_dm_spam
+
     dm_data = home.get("your_direct_messages", {})
     pending_count = dm_data.get("pending_request_count", 0)
     unread_count = dm_data.get("unread_message_count", 0)
@@ -139,19 +141,35 @@ async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
     if not pending_count and not unread_count:
         return
 
-    # Pending requests: log only — human must approve
+    # Pending requests: auto-reject spam, log legitimate ones
     if pending_count:
         try:
             reqs_resp = await client.dm_requests()
             items = reqs_resp.get("requests", {}).get("items", [])
             for req in items:
                 req_id = req.get("conversation_id", "")
-                if req_id and req_id not in _state["dm_request_ids_notified"]:
-                    from_name = req.get("from", {}).get("name", "unknown")
-                    preview = req.get("message_preview", "")[:80]
+                if not req_id:
+                    continue
+                from_name = req.get("from", {}).get("name", "unknown")
+                preview = req.get("message_preview", "")
+
+                # Auto-reject high-confidence spam with block
+                if _is_dm_spam(preview):
+                    try:
+                        await client.dm_reject_request(req_id, block=True)
+                        logger.warning(
+                            "[Moltbook] Auto-rejected spam DM from %s (id=%s): %s",
+                            from_name, req_id, preview[:60],
+                        )
+                    except Exception as exc:
+                        logger.warning("[Moltbook] Spam reject failed %s: %s", req_id, exc)
+                    continue
+
+                # Legitimate request — log for human review
+                if req_id not in _state["dm_request_ids_notified"]:
                     logger.info(
                         "[Moltbook] DM request from %s (id=%s): %s — human must approve",
-                        from_name, req_id, preview,
+                        from_name, req_id, preview[:80],
                     )
                     _state["dm_request_ids_notified"].add(req_id)
         except Exception as exc:
