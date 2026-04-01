@@ -1213,6 +1213,7 @@ async def ws_live(websocket: WebSocket) -> None:
         audio_turn_open = False
         awaiting_model_response = False
         model_turn_active = False
+        suppress_text_output_for_turn = False
         print("[ws_live] Session started — Gemini connected")
 
         def queue_session_event(
@@ -1547,7 +1548,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     raise ValueError(f"Unsupported message type: {msg_type}")
 
         async def pump_gemini_to_client() -> None:
-            nonlocal last_activity, awaiting_model_response, model_turn_active
+            nonlocal last_activity, awaiting_model_response, model_turn_active, suppress_text_output_for_turn
             print("[gemini\u2192client] pump started, waiting for Gemini responses...")
             # Aggregate small audio chunks to reduce WebSocket message frequency.
             # Gemini often sends many tiny PCM fragments per second; batching
@@ -1614,9 +1615,12 @@ async def ws_live(websocket: WebSocket) -> None:
                     elif out.type in {"model_text", "transcript_in", "transcript_out"}:
                         if out.text:
                             if out.type in {"model_text", "transcript_out"} and _looks_like_internal_note(out.text):
+                                suppress_text_output_for_turn = True
                                 continue
                             outgoing_text = out.text
                             if out.type in {"model_text", "transcript_out"}:
+                                if suppress_text_output_for_turn:
+                                    continue
                                 outgoing_text = _sanitize_caregiver_text(outgoing_text)
                                 if not outgoing_text or _looks_like_internal_note(outgoing_text):
                                     continue
@@ -1638,11 +1642,13 @@ async def ws_live(websocket: WebSocket) -> None:
                         _audio_playout_deadline = None
                         awaiting_model_response = False
                         model_turn_active = False
+                        suppress_text_output_for_turn = False
                         last_activity = time.monotonic()
                         print("[gemini\u2192client] model_audio_end \u2014 turn complete")
                         await websocket.send_text(json.dumps({"type": "model_audio_end"}))
                     elif out.type == "interrupted":
                         _audio_pending = bytearray()  # discard on interruption
+                        suppress_text_output_for_turn = False
                         _audio_playout_deadline = None
                         awaiting_model_response = False
                         model_turn_active = False
