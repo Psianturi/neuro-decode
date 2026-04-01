@@ -112,20 +112,20 @@ async def process_pending_followups(
                     sent_at=sent_at.replace("-", "\\-").replace(":", "\\:").replace(".", "\\."),
                 )
                 payload = {
-                    "chat_id": telegram_chat_id,
+                    "chat_id": str(telegram_chat_id).strip(),
                     "text": text,
                     "parse_mode": "MarkdownV2",
-                    "disable_web_page_preview": True,
+                    "disable_web_page_preview": "true",
                 }
                 encoded = urlparse.urlencode(payload).encode("utf-8")
                 req = urlrequest.Request(
-                    f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+                    f"https://api.telegram.org/bot{str(telegram_bot_token).strip()}/sendMessage",
                     data=encoded,
                     method="POST",
                 )
                 req.add_header("Content-Type", "application/x-www-form-urlencoded")
                 try:
-                    await asyncio.to_thread(urlrequest.urlopen, req, 10)
+                    await asyncio.to_thread(urlrequest.urlopen, req, timeout=10)
                 except Exception as tg_err:
                     logger.warning("[followup] Telegram delivery failed: %s", tg_err)
 
