@@ -1285,14 +1285,18 @@ async def ws_live(websocket: WebSocket) -> None:
         async def run_audio_observer(observer_audio: bytes) -> None:
             try:
                 note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
+                # Structured observer inference log for evaluation
+                import hashlib as _hashlib
+                _audio_hash = _hashlib.md5(observer_audio).hexdigest()[:8]
                 if note:
                     print(f"[observer] Audio note triggered")
+                    print(f"[observer_event] modality=audio bytes={len(observer_audio)} hash={_audio_hash} triggered=True")
                     observer_audio_log.append(note)
                     queue_session_event("observer_audio_trigger", source="audio_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    # Do not force a model response mid push-to-talk; keep this as
-                    # non-turn-completing context during an active audio turn.
                     await session.send_observer_note(note, end_of_turn=False)
+                else:
+                    print(f"[observer_event] modality=audio bytes={len(observer_audio)} hash={_audio_hash} triggered=False")
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -1505,6 +1509,11 @@ async def ws_live(websocket: WebSocket) -> None:
                     print(f"[client\u2192gemini] audio_stream_end — total {audio_chunk_count} chunks, {total_audio_bytes} bytes sent to Gemini")
                     audio_turn_open = False
                     awaiting_model_response = True
+                    # Clear any residual audio in the observer buffer so it does not
+                    # contaminate the next turn's inference window.
+                    if audio_observer_buffer:
+                        print(f"[observer] Clearing {len(audio_observer_buffer)} residual bytes from observer buffer at turn end")
+                        audio_observer_buffer.clear()
                     queue_session_event(
                         "audio_turn_submitted",
                         source="client_audio",
