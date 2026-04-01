@@ -129,14 +129,24 @@ async def _check_follow(author: str, client: MoltbookClient) -> None:
 async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
     """
     Handle DM activity per MESSAGING.md and HEARTBEAT Step 3.
+    - Uses dm_check() as fast early-exit before fetching details.
     - Pending requests: auto-reject high-confidence spam (with block), log others.
     - Unread messages in approved convos: auto-reply with Gemini.
     """
     from app.moltbook.moltbook_client import _is_dm_spam
 
-    dm_data = home.get("your_direct_messages", {})
-    pending_count = dm_data.get("pending_request_count", 0)
-    unread_count = dm_data.get("unread_message_count", 0)
+    # Fast check via /agents/dm/check — avoids extra API calls if nothing to do
+    try:
+        check = await client.dm_check()
+        if not check.get("has_activity"):
+            return
+        pending_count = int(check.get("requests", {}).get("count", 0) or 0)
+        unread_count = int(check.get("messages", {}).get("total_unread", 0) or 0)
+    except Exception:
+        # Fallback to /home data if dm_check fails
+        dm_data = home.get("your_direct_messages", {})
+        pending_count = dm_data.get("pending_request_count", 0)
+        unread_count = dm_data.get("unread_message_count", 0)
 
     if not pending_count and not unread_count:
         return
@@ -481,80 +491,79 @@ async def run_heartbeat_tick(
     # 3. Browse feed — comment on relevant external posts
     # ------------------------------------------------------------------
     external_comments = 0
-    try:
-        feed_resp = await client.get_feed(sort="hot", limit=12)
-        feed_posts: list[dict] = feed_resp.get("posts", [])
+    if client.is_rate_limited():
+        logger.warning("[Moltbook] Rate limit low — skipping feed browsing this cycle")
+    else:
+        try:
+            feed_resp = await client.get_feed(sort="hot", limit=12)
+            feed_posts: list[dict] = feed_resp.get("posts", [])
 
-        for feed_post in feed_posts:
-            if external_comments >= _MAX_EXTERNAL_COMMENTS_PER_CYCLE:
-                break
-            feed_post_id: str = feed_post.get("post_id") or feed_post.get("id", "")
-            if not feed_post_id or feed_post_id in _state["commented_post_ids"]:
-                continue
+            for feed_post in feed_posts:
+                if external_comments >= _MAX_EXTERNAL_COMMENTS_PER_CYCLE:
+                    break
+                feed_post_id: str = feed_post.get("post_id") or feed_post.get("id", "")
+                if not feed_post_id or feed_post_id in _state["commented_post_ids"]:
+                    continue
 
-            feed_title: str = feed_post.get("title", "")
-            feed_content: str = feed_post.get("content_preview") or feed_post.get("content", "")
-            feed_author: str = feed_post.get("author_name") or feed_post.get("author", {}).get("name", "")
+                feed_title: str = feed_post.get("title", "")
+                feed_content: str = feed_post.get("content_preview") or feed_post.get("content", "")
+                feed_author: str = feed_post.get("author_name") or feed_post.get("author", {}).get("name", "")
 
-            # Skip if same author
-            if feed_author.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
-                continue
+                if feed_author.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
+                    continue
 
-            # Relevance check
-            try:
-                relevant = await is_relevant_post(feed_title, feed_content, model)
-            except Exception:
-                relevant = False
+                try:
+                    relevant = await is_relevant_post(feed_title, feed_content, model)
+                except Exception:
+                    relevant = False
 
-            if not relevant:
-                # Still upvote good posts silently
-                if feed_post_id not in _state["upvoted_post_ids"]:
-                    try:
-                        await client.upvote_post(feed_post_id)
-                        _state["upvoted_post_ids"].add(feed_post_id)
-                        await _check_follow(feed_author, client)
-                    except Exception:
-                        pass
-                continue
+                if not relevant:
+                    if feed_post_id not in _state["upvoted_post_ids"]:
+                        try:
+                            await client.upvote_post(feed_post_id)
+                            _state["upvoted_post_ids"].add(feed_post_id)
+                            await _check_follow(feed_author, client)
+                        except Exception:
+                            pass
+                    continue
 
-            if not _can_comment():
-                logger.info("[Moltbook] Daily comment budget reached, skipping external comments")
-                break
+                if not _can_comment():
+                    logger.info("[Moltbook] Daily comment budget reached, skipping external comments")
+                    break
 
-            # Comment on the relevant post
-            try:
-                comment_text = await generate_comment_on_post(
-                    post_title=feed_title,
-                    post_content=feed_content,
-                    author_name=feed_author,
-                    model=model,
-                )
-                resp = await client.add_comment(
-                    post_id=feed_post_id,
-                    content=comment_text,
-                )
-                ok = await handle_verification(resp, model, client)
-                if ok:
-                    _state["commented_post_ids"].add(feed_post_id)
-                    _state["upvoted_post_ids"].add(feed_post_id)
-                    _record_comment()
-                    await client.upvote_post(feed_post_id)
-                    await _check_follow(feed_author, client)
-                    external_comments += 1
-                    logger.info("[Moltbook] Commented on external post %s", feed_post_id)
-                else:
-                    logger.warning(
-                        "[Moltbook] External comment verification failed for post %s — resp: %s",
-                        feed_post_id, resp
+                try:
+                    comment_text = await generate_comment_on_post(
+                        post_title=feed_title,
+                        post_content=feed_content,
+                        author_name=feed_author,
+                        model=model,
                     )
-                await asyncio.sleep(_COMMENT_COOLDOWN_SECONDS)
-            except Exception as exc:
-                logger.warning("[Moltbook] External comment failed: %s", exc)
-                summary["errors"].append(f"external_comment: {exc}")
+                    resp = await client.add_comment(
+                        post_id=feed_post_id,
+                        content=comment_text,
+                    )
+                    ok = await handle_verification(resp, model, client)
+                    if ok:
+                        _state["commented_post_ids"].add(feed_post_id)
+                        _state["upvoted_post_ids"].add(feed_post_id)
+                        _record_comment()
+                        await client.upvote_post(feed_post_id)
+                        await _check_follow(feed_author, client)
+                        external_comments += 1
+                        logger.info("[Moltbook] Commented on external post %s", feed_post_id)
+                    else:
+                        logger.warning(
+                            "[Moltbook] External comment verification failed for post %s — resp: %s",
+                            feed_post_id, resp
+                        )
+                    await asyncio.sleep(_COMMENT_COOLDOWN_SECONDS)
+                except Exception as exc:
+                    logger.warning("[Moltbook] External comment failed: %s", exc)
+                    summary["errors"].append(f"external_comment: {exc}")
 
-    except Exception as exc:
-        logger.warning("[Moltbook] Feed fetch failed: %s", exc)
-        summary["errors"].append(f"feed: {exc}")
+        except Exception as exc:
+            logger.warning("[Moltbook] Feed fetch failed: %s", exc)
+            summary["errors"].append(f"feed: {exc}")
 
     summary["external_comments"] = external_comments
 
@@ -562,6 +571,13 @@ async def run_heartbeat_tick(
     # 4. Create a proactive educational post (API-guarded, cold-start safe)
     # ------------------------------------------------------------------
     now_utc = datetime.now(timezone.utc)
+
+    if client.is_rate_limited():
+        logger.warning("[Moltbook] Rate limit low — skipping post creation this cycle")
+        summary["hours_since_last_post"] = 0.0
+        if firestore_project:
+            await flush_dedup_state(firestore_project, _state)
+        return summary
 
     # Determine hours since last post via Moltbook API first.
     # This survives cold starts where last_post_utc is always None.
