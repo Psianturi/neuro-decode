@@ -59,26 +59,50 @@ _state: dict[str, Any] = {
     "upvoted_post_ids": set(),           # post IDs already upvoted
     "last_pipeline_result": None,        # last pipeline summary for /pipeline/last endpoint
     "dedup_loaded": False,               # whether Firestore dedup state has been loaded
+    "harvested_queries": set(),          # search queries already run this calendar day (dedup)
+    "harvest_date": None,               # UTC date string for daily harvest dedup reset
+    "harvest_insights_total": 0,         # lifetime insights saved via semantic harvest
 }
 
 # Submolts to subscribe to on first run
 _SUBMOLTS_TO_SUBSCRIBE = [
     "general", "introductions", "philosophy", "todayilearned", "ai",
     "blesstheirhearts", "emergence", "ponderings",
+    "ai-research", "research", "neurodivergent-humans",
 ]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 5.5
+_POST_INTERVAL_HOURS = 5
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle
 _MAX_REPLIES_PER_CYCLE = 2
 # Max other agents' posts we'll comment on per cycle
-_MAX_EXTERNAL_COMMENTS_PER_CYCLE = 2
+_MAX_EXTERNAL_COMMENTS_PER_CYCLE = 3
 # Moltbook rule: min 20s between comments (established). We use 30s for safety.
-_COMMENT_COOLDOWN_SECONDS = 30
+_COMMENT_COOLDOWN_SECONDS = 40
 # Follow a molty once we've upvoted this many of their posts
 _FOLLOW_UPVOTE_THRESHOLD = 3
+
+# Semantic search harvest — ASD/caregiving topic pool (rotated across cycles)
+_HARVEST_QUERIES: list[str] = [
+    "autism sensory meltdown strategies",
+    "ASD child communication tips",
+    "autistic burnout caregiver support",
+    "autism IEP advice for parents",
+    "sensory processing activities children",
+    "autism sibling family dynamics",
+    "ASD caregiver self-care burnout",
+    "autism routine transitions tips",
+    "special needs parenting resources",
+    "autism masking late diagnosis",
+    "ASD school accommodation 504",
+    "autistic child sleep strategies",
+]
+# Max search queries to run per heartbeat cycle
+_MAX_HARVEST_PER_CYCLE = 2
+# Minimum word count in a post body to attempt insight extraction
+_HARVEST_MIN_CONTENT_WORDS = 30
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +257,114 @@ async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
 # ---------------------------------------------------------------------------
 # One-time onboarding (runs once per process lifetime after first heartbeat)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Semantic search harvest
+# ---------------------------------------------------------------------------
+
+
+async def _run_semantic_search_harvest(
+    client: MoltbookClient,
+    model: str,
+    firestore_project: str | None,
+    cycle: int,
+) -> int:
+    """
+    Harvest community insights from Moltbook search results.
+
+    Guards:
+    - Rate limit: skip entirely if client.is_rate_limited()
+    - Daily dedup: each query string is only run once per UTC calendar day
+    - Cycle budget: max _MAX_HARVEST_PER_CYCLE queries per heartbeat cycle
+    - Relevance gate: each result must pass is_relevant_post() before extraction
+    - Content floor: skip posts shorter than _HARVEST_MIN_CONTENT_WORDS words
+
+    Returns the number of insights saved to Firestore this cycle.
+    """
+    if client.is_rate_limited():
+        return 0
+    if not firestore_project:
+        return 0
+
+    # Daily dedup reset
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _state["harvest_date"] != today:
+        _state["harvested_queries"] = set()
+        _state["harvest_date"] = today
+
+    saved = 0
+    queries_this_cycle = 0
+
+    # Rotate through pool so different queries run on different cycles
+    offset = cycle % len(_HARVEST_QUERIES)
+    ordered = _HARVEST_QUERIES[offset:] + _HARVEST_QUERIES[:offset]
+
+    for query in ordered:
+        if queries_this_cycle >= _MAX_HARVEST_PER_CYCLE:
+            break
+        if query in _state["harvested_queries"]:
+            continue
+
+        queries_this_cycle += 1
+        _state["harvested_queries"].add(query)
+
+        try:
+            results = await client.search(query, search_type="posts", limit=6)
+            posts = results.get("posts", [])
+        except Exception as exc:
+            logger.warning("[Moltbook] Harvest search '%s' failed: %s", query, exc)
+            continue
+
+        for post in posts:
+            title: str = post.get("title", "")
+            content: str = post.get("content_preview") or post.get("content", "")
+            author: str = post.get("author_name") or post.get("author", {}).get("name", "") or "unknown"
+            post_id: str = post.get("post_id") or post.get("id", "")
+
+            # Skip own posts and very short content
+            if author.lower() in {"anakunggul", "neurobuddy", "neurodecode"}:
+                continue
+            if len((content or "").split()) < _HARVEST_MIN_CONTENT_WORDS:
+                continue
+
+            # Relevance gate — equivalent to similarity threshold
+            try:
+                relevant = await is_relevant_post(title, content, model)
+            except Exception:
+                relevant = False
+            if not relevant:
+                continue
+
+            try:
+                result = await extract_community_insight(
+                    post_title=title,
+                    comment_content=content,
+                    commenter_name=author,
+                    model=model,
+                )
+                if result is not None:
+                    insight_text, insight_type = result
+                    await save_insight(
+                        project=firestore_project,
+                        agent_name=author,
+                        post_title=title,
+                        insight_text=insight_text,
+                        insight_type=insight_type,
+                    )
+                    saved += 1
+                    _state["harvest_insights_total"] += 1
+            except Exception as exc:
+                logger.warning(
+                    "[Moltbook] Harvest insight extract failed post=%s: %s", post_id, exc
+                )
+
+    if queries_this_cycle:
+        logger.info(
+            "[Moltbook] Semantic harvest cycle=%d queries=%d insights_saved=%d total=%d",
+            cycle, queries_this_cycle, saved, _state["harvest_insights_total"],
+        )
+    return saved
 
 
 async def _run_onboarding(client: MoltbookClient, model: str) -> None:
@@ -568,6 +700,17 @@ async def run_heartbeat_tick(
     summary["external_comments"] = external_comments
 
     # ------------------------------------------------------------------
+    # 3b. Semantic search harvest — enrich community_insights collection
+    # ------------------------------------------------------------------
+    harvest_saved = await _run_semantic_search_harvest(
+        client=client,
+        model=model,
+        firestore_project=firestore_project,
+        cycle=cycle,
+    )
+    summary["harvest_insights_saved"] = harvest_saved
+
+    # ------------------------------------------------------------------
     # 4. Create a proactive educational post (API-guarded, cold-start safe)
     # ------------------------------------------------------------------
     now_utc = datetime.now(timezone.utc)
@@ -723,6 +866,9 @@ def get_state_snapshot() -> dict:
         "upvoted_comment_ids_count": len(_state["upvoted_comment_ids"]),
         "upvoted_post_ids_count": len(_state["upvoted_post_ids"]),
         "dm_requests_notified_count": len(_state["dm_request_ids_notified"]),
+        "harvest_queries_today": len(_state["harvested_queries"]),
+        "harvest_queries_pool": len(_HARVEST_QUERIES),
+        "harvest_insights_total": _state["harvest_insights_total"],
     }
 
 
