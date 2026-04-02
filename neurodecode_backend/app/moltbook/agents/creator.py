@@ -107,25 +107,30 @@ _DEFAULT_PERSONA = "parent_peer"
 
 def _pick_persona_for_context(ctx: SessionContext, post_count: int = 0) -> str:
     """Pick persona based on session data. Rotates across all 5 personas when data is thin."""
+    import time
+    personas = list(PERSONA_REGISTRY.keys())
+    bucket = int(time.time() // (3600 * 2))  # changes every 2h
+
+    # Only lock to sensory_specialist when audio/visual patterns are strongly dominant.
+    # If hint always contains "audio"/"visual" (normal for this app), we'd never rotate
+    # without this guard — so require >60% of total patterns to be that type.
+    audio_count = len(ctx.audio_trigger_patterns)
+    visual_count = len(ctx.visual_trigger_patterns)
+    total = audio_count + visual_count
     hint = (ctx.dominant_topic_hint or "").lower()
 
-    # If session data has clear trigger signals, use them
     if hint:
-        if "audio" in hint or "sound" in hint or "noise" in hint:
-            return "sensory_specialist"
-        if "visual" in hint or "light" in hint or "crowd" in hint:
-            return "sensory_specialist"
         if "school" in hint or "iep" in hint or "transition" in hint:
             return "iep_advocate"
         if "burnout" in hint or "caregiver" in hint:
             return "parent_peer"
+        # sensory only when strongly dominant (>60% of patterns)
+        if total > 0 and (audio_count + visual_count) / total > 0.6:
+            if audio_count / total > 0.6 or visual_count / total > 0.6:
+                # Still rotate 1-in-3 cycles to avoid full lock
+                if bucket % 3 != 0:
+                    return "sensory_specialist"
 
-    # No strong signal — rotate across all personas using time bucket alone.
-    # post_count resets on cold start so it's unreliable as a rotation seed.
-    # Use a finer time bucket (every 2h) so persona changes more frequently.
-    import time
-    personas = list(PERSONA_REGISTRY.keys())
-    bucket = int(time.time() // (3600 * 2))  # changes every 2h
     return personas[bucket % len(personas)]
 
 
