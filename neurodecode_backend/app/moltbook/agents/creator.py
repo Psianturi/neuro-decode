@@ -127,9 +127,12 @@ def _pick_persona_for_context(ctx: SessionContext, post_count: int = 0) -> str:
         # sensory only when strongly dominant (>60% of patterns)
         if total > 0 and (audio_count + visual_count) / total > 0.6:
             if audio_count / total > 0.6 or visual_count / total > 0.6:
-                # Still rotate 1-in-3 cycles to avoid full lock
+                # Rotate 1-in-3 cycles to a non-sensory persona
                 if bucket % 3 != 0:
                     return "sensory_specialist"
+                # Forced-rotation cycle: explicitly exclude sensory_specialist
+                non_sensory = [p for p in personas if p != "sensory_specialist"]
+                return non_sensory[bucket % len(non_sensory)]
 
     return personas[bucket % len(personas)]
 
