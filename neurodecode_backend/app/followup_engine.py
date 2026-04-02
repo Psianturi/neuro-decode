@@ -23,9 +23,9 @@ _FOLLOWUP_FCM_BODY = (
     "Tap to review recovery guidance."
 )
 _FOLLOWUP_TELEGRAM_TEMPLATE = (
-    "⏰ *NeuroDecode Follow\\-Up Check\\-In*\n"
-    "Session `{session_id}` had a high\\-severity pattern\\.\n"
-    "Scheduled check\\-in delivered to caregiver at {sent_at}\\."
+    "⏰ NeuroDecode Follow-Up Check-In\n"
+    "Session {session_id} had a high-severity pattern.\n"
+    "Scheduled check-in delivered to caregiver at {sent_at}."
 )
 
 
@@ -109,12 +109,11 @@ async def process_pending_followups(
                 from urllib import parse as urlparse, request as urlrequest
                 text = _FOLLOWUP_TELEGRAM_TEMPLATE.format(
                     session_id=session_id,
-                    sent_at=sent_at.replace("-", "\\-").replace(":", "\\:").replace(".", "\\."),
+                    sent_at=sent_at,
                 )
                 payload = {
                     "chat_id": str(telegram_chat_id).strip(),
                     "text": text,
-                    "parse_mode": "MarkdownV2",
                     "disable_web_page_preview": "true",
                 }
                 encoded = urlparse.urlencode(payload).encode("utf-8")
