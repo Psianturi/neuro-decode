@@ -69,13 +69,6 @@ class SessionStore:
         client = self._get_client()
         if client is None:
             raise RuntimeError("Firestore client unavailable")
-        # ADR-001: inject data-governance fields on every write.
-        # research_consent defaults to False — user must explicitly opt-in via Settings.
-        # These fields are added here so no caller needs to be aware of them.
-        record.setdefault("research_consent", False)
-        record.setdefault("consent_version", "v1.0")
-        record.setdefault("data_retention_days", 365)
-        record.setdefault("anonymized_export_at", None)
         # Use session_id as Firestore document ID so doc_id == session_id everywhere.
         # This allows schedule_followup to update by session_id directly.
         session_id = str(record.get("session_id") or "")
@@ -123,6 +116,13 @@ class SessionStore:
         return out
 
     async def store(self, record: dict[str, object]) -> None:
+        # ADR-001: inject governance fields before memory write so both
+        # Firestore and in-memory fallback carry the same schema.
+        record.setdefault("research_consent", False)
+        record.setdefault("consent_version", "v1.0")
+        record.setdefault("data_retention_days", 365)
+        record.setdefault("anonymized_export_at", None)
+
         await self._remember_memory(record)
 
         if not self._firestore_enabled:
