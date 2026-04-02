@@ -72,7 +72,7 @@ _SUBMOLTS_TO_SUBSCRIBE = [
 ]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 5
+_POST_INTERVAL_HOURS = 4
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle

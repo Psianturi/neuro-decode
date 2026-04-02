@@ -37,7 +37,7 @@ PERSONA_REGISTRY: dict[str, dict[str, Any]] = {
             "auditory processing", "tactile defensiveness", "vestibular needs",
         ],
         "tone": "precise, evidence-informed, practical",
-        "submolt": "general",
+        "submolt": ["general", "research" "neurodivergent-humans"],
     },
     "iep_advocate": {
         "display_name": "IEP Advocate",
@@ -52,7 +52,7 @@ PERSONA_REGISTRY: dict[str, dict[str, Any]] = {
             "transition planning", "504 plans", "inclusive education",
         ],
         "tone": "empowering, practical, parent-to-parent",
-        "submolt": "general",
+        "submolt": ["general", "todayilearned"],
     },
     "parent_peer": {
         "display_name": "Parent Peer",
@@ -67,7 +67,7 @@ PERSONA_REGISTRY: dict[str, dict[str, Any]] = {
             "meltdown recovery", "self-care", "community support",
         ],
         "tone": "warm, honest, peer-to-peer",
-        "submolt": "general",
+        "submolt": ["general", "neurodivergent-humans"],
     },
     "researcher": {
         "display_name": "Researcher",
@@ -82,7 +82,7 @@ PERSONA_REGISTRY: dict[str, dict[str, Any]] = {
             "gender and autism", "co-occurring conditions", "intervention evidence",
         ],
         "tone": "analytical, careful, accessible",
-        "submolt": "todayilearned",
+        "submolt": ["research", "todayilearned", "ai-research"],
     },
     "community_connector": {
         "display_name": "Community Connector",
@@ -98,7 +98,7 @@ PERSONA_REGISTRY: dict[str, dict[str, Any]] = {
             "representation in media",
         ],
         "tone": "inclusive, celebratory, bridge-building",
-        "submolt": "general",
+        "submolt": ["general", "neurodivergent-humans"],
     },
 }
 
@@ -189,6 +189,7 @@ class CreatorAgent(BaseAgent):
         audio_summary = "; ".join(ctx.audio_trigger_patterns[:3]) or "none"
         visual_summary = "; ".join(ctx.visual_trigger_patterns[:3]) or "none"
         follow_summary = "; ".join(ctx.common_follow_ups[:3]) or "none"
+        submolt_options = " or ".join(persona["submolt"])
 
         # Build topic avoidance block from recent post titles
         avoid_block = ""
@@ -210,7 +211,7 @@ class CreatorAgent(BaseAgent):
             f"(focus: {', '.join(persona['focus_topics'][:3])})\n\n"
             "Identify the single most valuable community insight to share based on these patterns.\n"
             "Respond with JSON only, no markdown:\n"
-            '{"topic": "...", "angle": "...", "evidence_summary": "...", "suggested_submolt": "general or todayilearned"}'
+            f'{{"topic": "...", "angle": "...", "evidence_summary": "...", "suggested_submolt": "{submolt_options}"}}'
         )
 
         try:
@@ -236,7 +237,7 @@ class CreatorAgent(BaseAgent):
                 topic=data.get("topic", ctx.dominant_topic_hint or "ASD caregiving"),
                 angle=data.get("angle", "practical caregiver perspective"),
                 evidence_summary=data.get("evidence_summary", "patterns observed in recent sessions"),
-                suggested_submolt=data.get("suggested_submolt", persona["submolt"]),
+                suggested_submolt=data.get("suggested_submolt") or __import__("random").choice(persona["submolt"]),
                 persona_key=persona_key,
             )
         except Exception as exc:
@@ -252,6 +253,6 @@ class CreatorAgent(BaseAgent):
             topic=topic,
             angle="practical caregiver perspective",
             evidence_summary="based on common caregiving experiences",
-            suggested_submolt=persona["submolt"],
+            suggested_submolt=__import__("random").choice(persona["submolt"]),
             persona_key=persona_key,
         )
