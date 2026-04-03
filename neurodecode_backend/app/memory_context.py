@@ -11,20 +11,30 @@ def build_private_memory_context(
     lines: list[str] = []
 
     if profile:
-        stable_fields = (
-            ("child_name", "Child"),
-            ("caregiver_name", "Caregiver"),
-            ("language_preference", "Language preference"),
-            ("known_audio_triggers", "Known audio triggers"),
-            ("known_visual_triggers", "Known visual triggers"),
-            ("effective_interventions", "Previously effective interventions"),
-            ("ineffective_interventions", "Previously ineffective interventions"),
-            ("notes", "Profile notes"),
+        def _pick_profile_field(profile: dict, *keys: str) -> object:
+            """Return first non-empty value across multiple possible key names."""
+            for key in keys:
+                value = profile.get(key)
+                if value not in (None, "", [], {}):
+                    return value
+            return None
+
+        stable_fields: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+            # (label, primary_key, fallback_keys...)
+            ("Child",                           "child_name",             ("childName",)),
+            ("Caregiver",                        "caregiver_name",         ("caregiverName",)),
+            ("Language preference",              "language_preference",    ()),
+            ("Known audio triggers",             "known_audio_triggers",   ("trigger_tags", "triggers")),
+            ("Known visual triggers",            "known_visual_triggers",  ("trigger_tags",)),
+            ("Previously effective interventions","effective_interventions",("calming_tags", "calming_supports")),
+            ("Previously ineffective interventions","ineffective_interventions", ()),
+            ("Communication preferences",        "communication_tags",     ("communication_preferences",)),
+            ("Profile notes",                    "notes",                  ("support_notes",)),
         )
         stable_lines: list[str] = []
-        for key, label in stable_fields:
-            value = profile.get(key)
-            if value in (None, "", [], {}):
+        for label, primary_key, fallback_keys in stable_fields:
+            value = _pick_profile_field(profile, primary_key, *fallback_keys)
+            if value is None:
                 continue
             stable_lines.append(f"- {label}: {value}")
         if stable_lines:
