@@ -1154,20 +1154,31 @@ async def ws_live(websocket: WebSocket) -> None:
                 memory_lines = [line.strip() for line in memory_context.splitlines() if line.strip()]
                 preview = " | ".join(memory_lines[1:3]) if len(memory_lines) > 1 else memory_lines[0]
 
+                # Priority for observer note enrichment: actionable cues first (triggers, interventions), then identity cues (child name). 
+                _high_priority_prefixes = (
+                    "known audio triggers:",
+                    "known visual triggers:",
+                    "previously effective interventions:",
+                    "effective interventions:",
+                )
+                _low_priority_prefixes = (
+                    "child:",
+                    "caregiver:",
+                    "profile notes:",
+                )
                 for line in memory_lines:
                     normalized = line.lstrip("- ").strip()
-                    if normalized.lower().startswith("child:"):
-                        profile_memory_cues.append(normalized)
-                    elif normalized.lower().startswith("caregiver:"):
-                        profile_memory_cues.append(normalized)
-                    elif normalized.lower().startswith("profile notes:"):
-                        profile_memory_cues.append(normalized)
-                    elif normalized.lower().startswith("known audio triggers:"):
-                        profile_memory_cues.append(normalized)
-                    elif normalized.lower().startswith("known visual triggers:"):
+                    if any(normalized.lower().startswith(p) for p in _high_priority_prefixes):
                         profile_memory_cues.append(normalized)
                     if len(profile_memory_cues) >= 3:
                         break
+                for line in memory_lines:
+                    if len(profile_memory_cues) >= 3:
+                        break
+                    normalized = line.lstrip("- ").strip()
+                    if any(normalized.lower().startswith(p) for p in _low_priority_prefixes):
+                        if normalized not in profile_memory_cues:
+                            profile_memory_cues.append(normalized)
 
                 print(
                     f"[profile_memory] Loaded for profile_id={profile_id} lines={len(memory_lines)} preview={preview[:240]}"
