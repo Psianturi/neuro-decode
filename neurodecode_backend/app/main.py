@@ -51,7 +51,13 @@ SYSTEM_INSTRUCTION = (
     "advice. You will sometimes receive hidden internal sensor notes formatted as "
     "[Visual Observer Note] or [Audio Observer Note]. Treat these notes as private "
     "context only. NEVER read or quote the note text verbatim to the caregiver. "
-    "Instead, translate it into natural, calm, practical support guidance. Prioritize "
+    "Instead, translate it into natural, calm, practical support guidance. "
+    "When an observer note includes profile context (known triggers, effective interventions), "
+    "prioritize those specific interventions above generic suggestions — do not give generic ASD advice "
+    "when you have specific information about this child. "
+    "If the observer note mentions this is trigger #2 or higher in the same session, "
+    "acknowledge the escalation pattern explicitly: suggest a proactive strategy, not just reactive calming. "
+    "Prioritize "
     "short, supportive interventions such as reducing sensory load, grounding, "
     "co-regulation, deep pressure when appropriate, and clear step-by-step caregiver "
     "actions. Ask one clarifying question if uncertainty is high. If there is risk of "
@@ -1282,10 +1288,15 @@ async def ws_live(websocket: WebSocket) -> None:
         def can_forward_visual_context() -> bool:
             return not audio_turn_open and not awaiting_model_response and not model_turn_active
 
+        def _build_profile_context_snippet() -> str:
+            """Build a compact profile snippet to enrich observer notes mid-session."""
+            if not profile_memory_cues:
+                return ""
+            return " | ".join(profile_memory_cues[:3])
+
         async def run_audio_observer(observer_audio: bytes) -> None:
             try:
                 note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
-                # Structured observer inference log for evaluation
                 import hashlib as _hashlib
                 _audio_hash = _hashlib.md5(observer_audio).hexdigest()[:8]
                 if note:
@@ -1294,7 +1305,14 @@ async def ws_live(websocket: WebSocket) -> None:
                     observer_audio_log.append(note)
                     queue_session_event("observer_audio_trigger", source="audio_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    await session.send_observer_note(note, end_of_turn=False)
+                    # Enrich note with profile context so Gemini responds to THIS child --------------------------------------
+                    profile_snippet = _build_profile_context_snippet()
+                    enriched = note if not profile_snippet else f"{note} | Profile context: {profile_snippet}"
+                    # Include session pattern: how many audio triggers so far this session
+                    trigger_count = len(observer_audio_log)
+                    if trigger_count >= 2:
+                        enriched += f" | Audio trigger #{trigger_count} this session — escalation pattern possible."
+                    await session.send_observer_note(enriched, end_of_turn=False)
                 else:
                     print(f"[observer_event] modality=audio bytes={len(observer_audio)} hash={_audio_hash} triggered=False")
             except asyncio.CancelledError:
@@ -1315,9 +1333,13 @@ async def ws_live(websocket: WebSocket) -> None:
                     observer_visual_log.append(note)
                     queue_session_event("observer_visual_trigger", source="visual_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    # Keep observer notes as passive context. This avoids repeated,
-                    # unsolicited model responses when observer mode is enabled.
-                    await session.send_observer_note(note, end_of_turn=False)
+                    # Enrich note with profile context so Gemini responds to THIS child
+                    profile_snippet = _build_profile_context_snippet()
+                    enriched = note if not profile_snippet else f"{note} | Profile context: {profile_snippet}"
+                    trigger_count = len(observer_visual_log)
+                    if trigger_count >= 2:
+                        enriched += f" | Visual trigger #{trigger_count} this session — consider reducing visual stimuli."
+                    await session.send_observer_note(enriched, end_of_turn=False)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
