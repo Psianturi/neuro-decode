@@ -37,6 +37,7 @@ class Settings:
 
     fcm_enabled: bool
     firestore_push_device_collection: str
+    firestore_clinical_collection: str
     followup_delay_hours: int
     followup_min_duration_seconds: int
 
@@ -117,6 +118,9 @@ def get_settings() -> Settings:
     firestore_push_device_collection = os.getenv(
         "NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION", "push_device_tokens"
     )
+    firestore_clinical_collection = os.getenv(
+        "NEURODECODE_FIRESTORE_CLINICAL_COLLECTION", "clinical_resources"
+    )
     followup_delay_hours = max(
         1, min(int(os.getenv("NEURODECODE_FOLLOWUP_DELAY_HOURS", "4")), 48)
     )
@@ -150,6 +154,7 @@ def get_settings() -> Settings:
         admin_debug_max_items=admin_debug_max_items,
         fcm_enabled=fcm_enabled,
         firestore_push_device_collection=firestore_push_device_collection,
+        firestore_clinical_collection=firestore_clinical_collection,
         followup_delay_hours=followup_delay_hours,
         followup_min_duration_seconds=followup_min_duration_seconds,
     )
