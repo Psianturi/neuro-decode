@@ -74,8 +74,8 @@ Current default deployment target in this repo:
 
 Deploy/update runtime secrets and flags:
 
-> ⚠️ **PENTING:** Selalu gunakan `--update-secrets` (bukan `--set-secrets`) saat menambah secret
-> baru agar secret yang sudah ada tidak terhapus. `--set-secrets` = **replace all**.
+> ⚠️ **IMPORTANT:** Always use `--update-secrets` (not `--set-secrets`) when adding a new secret
+> to avoid wiping existing ones. `--set-secrets` = **replace all**.
 
 Secret Manager secrets yang harus terpasang di Cloud Run:
 
@@ -87,9 +87,9 @@ Secret Manager secrets yang harus terpasang di Cloud Run:
 | `TELEGRAM_CHAT_ID` | `neurodecode-telegram-chat-id` |
 | `NEURODECODE_ADMIN_SECRET` | `neurodecode-admin-secret` |
 
-Semua sudah terdaftar di `cloudbuild.yaml` baris `--set-secrets`. Setiap build otomatis set ulang semua 5 secret sekaligus.
+All secrets are declared in `cloudbuild.yaml` under `--set-secrets`. Every build re-applies all 5 secrets automatically.
 
-Untuk update satu secret tanpa mengganggu yang lain:
+To update a single secret without touching the others:
 
 ```powershell
 gcloud run services update neurodecode-backend `
@@ -99,7 +99,7 @@ gcloud run services update neurodecode-backend `
 	--update-secrets NEURODECODE_ADMIN_SECRET=neurodecode-admin-secret:latest
 ```
 
-Untuk restore semua secrets sekaligus (jika ada yang hilang):
+To restore all secrets at once (if any are missing):
 
 ```powershell
 gcloud run services update neurodecode-backend `
@@ -141,19 +141,19 @@ Important:
 
 ## Clinical Resources harvest (Phase 4)
 
-Data klinik/sekolah ASD Jakarta di-harvest dari Google Places API dan disimpan permanen ke Firestore `clinical_resources/`. User tidak pernah hit Places API.
+ASD clinic and school data for Jakarta is harvested from Google Places API and stored permanently in Firestore `clinical_resources/`. End users never hit the Places API directly.
 
-Pre-requisites: set `PLACES_API_KEY_NEW` dan `PLACES_API_KEY` di `.env` (sudah di `.gitignore`).
+Pre-requisites: set `PLACES_API_KEY_NEW` and `PLACES_API_KEY` in `.env` (already in `.gitignore`).
 
 ```powershell
-# Jalankan harvest (one-time / bulanan)
+# Run harvest (one-time or monthly refresh)
 c:/PROJ/NeuroDecode/.venv/Scripts/python.exe neurodecode_backend/scripts/harvest_clinical_places.py
 
-# Seed manual (Anak Unggul, dll)
+# Manual seed (Anak Unggul, etc.)
 c:/PROJ/NeuroDecode/.venv/Scripts/python.exe neurodecode_backend/scripts/seed_clinical_resources.py
 ```
 
-Firestore composite indexes yang dibutuhkan (sudah READY):
+Required Firestore composite indexes (already READY):
 
 ```bash
 # city + is_active
