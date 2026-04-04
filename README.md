@@ -189,24 +189,75 @@ NeuroDecode reduces caregiver cognitive load with a live loop:
 ## Architecture (High-Level)
 
 ```mermaid
-flowchart LR
-    A[Flutter Mobile App] -->|wss /ws/live| B[FastAPI Backend on Cloud Run]
-    B --> C[Gemini Live API]
-    B --> D[Audio Observer Model]
-    B --> E[Visual Observer Model]
-    B --> F[Firestore: sessions, events, profiles, memory, notifications, push tokens, clinical_resources]
-    B --> G[Secret Manager]
-    B --> H[Firebase Admin SDK -> FCM]
-    D --> C
-    E --> C
-    F --> B
-    G --> B
-    H --> A
-    C -->|audio/transcript| A
-```
-    G --> B
-    H --> A
-    C -->|audio/transcript| A
+flowchart TD
+    subgraph Flutter["Flutter Mobile App (Android)"]
+        F_UI[Live Support / History / Find Help / Buddy tabs]
+        F_PCM[Native Android PCM AudioTrack]
+    end
+
+    subgraph Backend["FastAPI Backend — Cloud Run asia-southeast1"]
+        B_WS[WebSocket /ws/live]
+        B_HTTP[HTTP REST endpoints]
+        B_AUDIO[Audio Observer CNN]
+        B_VIS[Visual Observer VGG16]
+        B_FOLLOW[followup_engine.py]
+        B_RULES[Rule-based notification engine]
+        B_CLINICAL[clinical_store.py]
+        B_PROFILE[profile_store / memory_context]
+        B_RELEVANCE[RelevanceFilterAgent]
+    end
+
+    subgraph Moltbook["neurodecode-moltbook — Cloud Run separate service"]
+        M_HEART[Heartbeat loop]
+        M_EXTRACT[extract_community_insight]
+        M_PERSONA[Persona pool 5 agents]
+    end
+
+    subgraph GCP["Google Cloud Platform"]
+        GCS[Cloud Scheduler every 15 min]
+        SM[Secret Manager]
+        CB[Cloud Build CI/CD]
+    end
+
+    subgraph Firestore["Firestore Collections"]
+        FS_S[sessions + events]
+        FS_P[profile_memory]
+        FS_CI[community_insights]
+        FS_N[notifications]
+        FS_PT[push_device_tokens]
+        FS_CR[clinical_resources 198 resources]
+        FS_KB[knowledge_base planned]
+    end
+
+    Flutter -->|wss /ws/live push-to-talk| B_WS
+    Flutter -->|HTTP GET profiles notifications clinical| B_HTTP
+    B_WS --> Gemini[Gemini Live API]
+    Gemini -->|audio + transcript| F_PCM
+    B_WS --> B_AUDIO
+    B_WS --> B_VIS
+    B_AUDIO -->|heuristic signal| Gemini
+    B_VIS -->|heuristic signal| Gemini
+    B_WS --> B_PROFILE
+    B_PROFILE --> FS_P
+    B_RELEVANCE --> FS_CI
+    B_RELEVANCE -->|relevant insights injected| Gemini
+    B_WS --> B_RULES
+    B_RULES --> FCM[Firebase Admin SDK → FCM]
+    FCM -->|push notification| Flutter
+    GCS -->|POST /admin/followup/process| B_FOLLOW
+    B_FOLLOW --> FS_S
+    B_FOLLOW --> FCM
+    B_FOLLOW --> Telegram[Telegram Admin Channel]
+    B_HTTP --> B_CLINICAL
+    B_CLINICAL --> FS_CR
+    Backend --> SM
+    Backend --> FS_S
+    Backend --> FS_N
+    Backend --> FS_PT
+    M_HEART -->|monitor Anak Unggul posts| Moltbook_API[Moltbook API]
+    M_EXTRACT --> FS_CI
+    M_PERSONA -->|reply as persona| Moltbook_API
+    CB -->|push to dev → auto deploy| Backend
 ```
 
 ## Repository Structure
