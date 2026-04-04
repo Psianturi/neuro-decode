@@ -25,6 +25,7 @@ from app.followup_engine import process_pending_followups
 from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.rule_debug_store import RuleDebugStore
+from app.clinical_store import ClinicalStore
 from app.session_store import SessionStore
 from app.settings import get_settings
 
@@ -707,6 +708,20 @@ push_device_store = PushDeviceStore(
 )
 push_sender = PushSender(enabled=_startup_settings.fcm_enabled)
 
+_clinical_store: ClinicalStore | None = None
+
+def _get_clinical_store() -> ClinicalStore:
+    """Lazy-init ClinicalStore (reuses Firestore client from push_device_store)."""
+    global _clinical_store
+    if _clinical_store is None:
+        from google.cloud import firestore as _fs
+        _db = _fs.Client(project=_startup_settings.firestore_project)
+        _clinical_store = ClinicalStore(
+            db=_db,
+            collection=_startup_settings.firestore_clinical_collection,
+        )
+    return _clinical_store
+
 
 def _format_telegram_message(*, duration_seconds: int, summary_text: str) -> str:
     minutes = max(1, round(duration_seconds / 60))
@@ -1126,6 +1141,75 @@ async def profile_memory_context(
         "recent_session_count": len(sessions),
         "context": context,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Clinical Resources  (Phase 4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/clinical-resources")
+def clinical_resources_list(
+    city: str | None = None,
+    resource_type: str | None = None,
+    active_only: bool = True,
+    limit: int = 50,
+) -> dict[str, object]:
+    """List clinical resources, optionally filtered by city and/or resource_type."""
+    if limit < 1 or limit > 200:
+        limit = 50
+    store = _get_clinical_store()
+    resources = store.list_resources(
+        city=city,
+        resource_type=resource_type,
+        active_only=active_only,
+        limit=limit,
+    )
+    return {"status": "ok", "count": len(resources), "resources": resources}
+
+
+@app.get("/clinical-resources/{resource_id}")
+def clinical_resource_get(resource_id: str) -> dict[str, object]:
+    """Get a single clinical resource by Firestore document ID (or place_id)."""
+    store = _get_clinical_store()
+    resource = store.get_resource(resource_id)
+    if resource is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return {"status": "ok", "resource": resource}
+
+
+@app.post("/admin/clinical-resources")
+def clinical_resource_create(
+    payload: dict[str, object],
+    x_admin_secret: str | None = Header(default=None, alias="X-Admin-Secret"),
+) -> dict[str, object]:
+    """Create a new clinical resource. Admin-only (requires X-Admin-Secret header)."""
+    admin_secret = _startup_settings.admin_secret
+    if admin_secret and x_admin_secret != admin_secret:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Forbidden")
+    store = _get_clinical_store()
+    doc_id = store.create_resource(payload)
+    return {"status": "ok", "id": doc_id}
+
+
+@app.patch("/admin/clinical-resources/{resource_id}")
+def clinical_resource_update(
+    resource_id: str,
+    payload: dict[str, object],
+    x_admin_secret: str | None = Header(default=None, alias="X-Admin-Secret"),
+) -> dict[str, object]:
+    """Partial update a clinical resource. Admin-only."""
+    admin_secret = _startup_settings.admin_secret
+    if admin_secret and x_admin_secret != admin_secret:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Forbidden")
+    store = _get_clinical_store()
+    updated = store.update_resource(resource_id, payload)
+    if not updated:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return {"status": "ok", "id": resource_id}
 
 
 @app.websocket("/ws/live")
