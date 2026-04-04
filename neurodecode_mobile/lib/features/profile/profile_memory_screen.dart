@@ -533,6 +533,21 @@ class _ProfileMemoryScreenState extends State<ProfileMemoryScreen> {
                   onTap: (value) =>
                       _toggleSelection(_selectedCommunicationPrefs, value),
                 ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _isSavingProfile ? null : _saveProfile,
+                    icon: _isSavingProfile
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save),
+                    label: const Text('SAVE SUPPORT PREFERENCES'),
+                  ),
+                ),
               ],
             ),
           ),
