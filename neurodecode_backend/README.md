@@ -31,7 +31,7 @@ HTTP:
 - `GET /admin/push/devices` (admin token required)
 - `POST /admin/push/test` (admin token required)
 
-Clinical Resources (Phase 4):
+Clinical Resources:
 
 - `GET /clinical-resources` — list, optional `?city=jakarta&resource_type=clinic&limit=50`
 - `GET /clinical-resources/{id}` — single resource by Firestore doc ID or Google `place_id`
@@ -139,7 +139,7 @@ Important:
 - If live session returns `GEMINI_API_KEY is required`, run the "restore all secrets" command above — most likely `--set-secrets` was used instead of `--update-secrets` somewhere.
 - `NEURODECODE_ADMIN_SECRET` guards `POST /admin/clinical-resources` and `PATCH /admin/clinical-resources/{id}`. Without it set, those endpoints are unprotected.
 
-## Clinical Resources harvest (Phase 4)
+## Clinical Resources harvest
 
 ASD clinic and school data for Jakarta is harvested from Google Places API and stored permanently in Firestore `clinical_resources/`. End users never hit the Places API directly.
 

@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+import '../clinical/find_help_screen.dart';
 import '../home/home_dashboard_screen.dart';
 import '../mascot/mascot_buddy_screen.dart';
 import '../support/support_hub_screen.dart';
@@ -36,6 +37,7 @@ class _MainShellScreenState extends State<MainShellScreen> {
             onGoSupport: () => setState(() => _currentIndex = 1),
           ),
           SupportHubScreen(cameras: widget.cameras),
+          const FindHelpScreen(),
           MascotBuddyScreen(
             cameras: widget.cameras,
             themeSelection: widget.themeSelection,
@@ -62,6 +64,11 @@ class _MainShellScreenState extends State<MainShellScreen> {
             icon: Icon(Icons.support_agent_outlined),
             selectedIcon: Icon(Icons.support_agent),
             label: 'Support',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.medical_services_outlined),
+            selectedIcon: Icon(Icons.medical_services),
+            label: 'Find Help',
           ),
           NavigationDestination(
             icon: Icon(Icons.smart_toy_outlined),

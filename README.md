@@ -4,18 +4,135 @@ NeuroDecode AI is a real-time multimodal caregiving copilot for high-stress sens
 
 It is designed for caregivers who need immediate support without typing. The app can listen, optionally observe with camera context, and respond with calm, actionable guidance in the same session.
 
+---
+
+## Roadmap
+
+Full build history from initial prototype to current state, plus planned next steps.
+
+---
+
+### Phase 0 — MVP ✅ Delivered
+
+*The initial proof-of-concept built for the hackathon. Branch `main` is frozen as a snapshot of this state.*
+
+- Real-time caregiver co-pilot over WebSocket (`/ws/live`).
+- Gemini Live API integration: push-to-talk → AI audio response streamed back.
+- Audio Observer: custom Keras ML model trained on ASD behavioral audio cues, runs as a background heuristic signal.
+- Visual Observer: camera frames analyzed in parallel for behavioral context.
+- ASD caregiver system prompt engineering (non-diagnostic, non-judgmental, bilingual EN/ID).
+- Deployed to Cloud Run (asia-southeast1).
+
+---
+
+### Phase 1 — Production Hardening & Session History ✅ Delivered
+
+*Stability and persistence layer so real caregivers can use it beyond a demo.*
+
+- Firestore session persistence (`sessions/` + `events/` collections).
+- Post-session AI summary: title, triggers, agent actions, follow-up, safety note — generated via Gemini after session close.
+- Fixed critical WebSocket stability bug (`asyncio.wait(FIRST_COMPLETED)` caused early session close after the first Gemini turn).
+- Native Android PCM audio path: stable 24kHz playback with no crackling or latency buildup.
+- Cloud Build CI/CD pipeline (`cloudbuild.yaml`) for automatic deployment on push to `dev`.
+- History & Insights screen in Flutter: timeline of past sessions with structured summaries.
+
+---
+
+### Phase 2 — Proactive Push Notifications ✅ Delivered
+
+*The app reaches out to caregivers — they don't have to remember to open it.*
+
+- Rule-based proactive engine: analyses post-session data and fires FCM push notifications (e.g. safety follow-ups, check-ins).
+- Firebase Cloud Messaging (FCM) → Android push delivery.
+- `notifications/` Firestore collection: full notification history with read/unread state.
+- Notifications Center screen in Flutter with unread badge.
+- Push device token registration and deactivation (`/devices/push-token`).
+- Telegram admin alert channel for monitoring session events.
+
+---
+
+### Phase 2.5 — In-App Follow-Up Response Flow ⏸ Deferred
+
+*Caregivers respond to AI follow-ups directly inside the notification — not just reading them.*
+
+- In-app notification tray with reply input (e.g. "How is your child now?").
+- Follow-up response routing back to backend for AI processing.
+- **Status:** FCM banners are delivered and visible. The in-app reply flow is deferred until post-hackathon announcement period.
+
+---
+
+### Phase 3A — Community Intelligence via Moltbook ✅ Delivered
+
+*Harvest real caregiver community insights and inject them as context during live sessions.*
+
+- Moltbook social API integration: `neurodecode-moltbook` agent (separate Cloud Run service) monitors Anak Unggul community posts.
+- Incoming comments are parsed by `extract_community_insight()` → saved to `community_insights/` Firestore collection.
+- `RelevanceFilterAgent`: single Gemini call (temperature 0.0) scores which community insights are relevant per active session profile.
+- Relevant insights injected into session context alongside profile memory.
+- Lives on branch `feature/moltbook-integration` wrapping the main backend.
+
+---
+
+### Phase 3B — Profile Memory & Personalization ✅ Delivered
+
+*Agent remembers each child's specific triggers and what actually helps them.*
+
+- Profile Workspace screen in Flutter: caregiver sets structured support preferences (known triggers, effective interventions, communication style, sensory profile).
+- `profile_memory/` Firestore collection.
+- At session start, backend retrieves profile memory context and injects it into the Gemini system prompt — Buddy responds with child-specific strategies, not generic ASD advice.
+- Memory saving from History/Insights: AI surfaces suggested memory actions ("Save this trigger?") that caregivers can approve with one tap.
+- Feature-flagged via `NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT`.
+
+---
+
+### Phase 4 — Clinical Routing / Find Help ✅ Delivered
+
+*"Bridging the gap between digital assistance and real-world care — connect caregivers with specialized ASD clinics, occupational therapists, or emergency telemedicine services."*
+
+- Google Places API (New) harvest script: 196 ASD-relevant resources for Jakarta (clinics, therapists, hospitals, inclusive schools, community centres) stored in Firestore `clinical_resources/`.
+- 2 manually seeded entries for Anak Unggul (Sunter + Kelapa Gading locations).
+- 3 Firestore composite indexes for efficient filtering: `city+is_active`, `resource_type+is_active`, `city+resource_type+is_active`.
+- REST API: `GET /clinical-resources` (filters: city, resource_type, active_only), `GET /clinical-resources/{id}`.
+- Admin write API: `POST` / `PATCH /admin/clinical-resources` guarded by `X-Admin-Secret`.
+- Flutter **Find Help** tab (4th bottom-nav item): resource cards with type badge, address, tap-to-copy phone, staleness warning, and filter chips (All / Clinic / Therapist / School / Hospital / Community).
+
+---
+
+### Phase 5 — Time-Delayed Proactive Pipelines 🔲 Planned
+
+*"Utilizing Cloud Scheduler to send gentle check-in notifications hours after a severe meltdown to monitor the child's recovery."*
+
+- Session severity scoring in the backend post-session.
+- Cloud Scheduler or Cloud Tasks: schedule a delayed push notification 3–6 hours after a high-severity session.
+- Delayed follow-up template: "Hope your little one is recovering — how are things now?"
+- Opt-out / snooze from the notification itself.
+
+---
+
+### Phase 6 — Longitudinal Analytics Dashboard 🔲 Planned
+
+*"Exporting Firestore session data to BigQuery to help caregivers and therapists visualize trigger trends and intervention success rates over months."*
+
+- BigQuery export pipeline for session and event data.
+- Caregiver dashboard: trigger frequency charts, intervention success rates, session duration trends over months.
+- Therapist/clinician sharing view (read-only link).
+- Optional: session export to PDF for clinical appointments.
+
+---
+
 ## Product Snapshot (Current)
 
 Current implemented user flow:
 
-1. Choose `Audio only` or `Video + audio` in Support.
+1. Choose `Audio only` or `Video + audio` in the Support tab.
 2. Select or enter a `Profile ID`.
 3. Start live session and speak with push-to-talk.
 4. Receive Gemini guidance (audio + transcript).
 5. Review post-session summary in History / Insights.
 6. Save suggested memories (trigger/follow-up) to profile memory.
+7. Browse ASD clinics, therapists, and schools in the **Find Help** tab.
 
-Major capabilities already running:
+Major capabilities running in production:
 
 1. Multi-turn live session over WebSocket (`/ws/live`).
 2. Native Android PCM playback path for stable 24kHz output.
@@ -23,6 +140,8 @@ Major capabilities already running:
 4. Retrieval-based profile memory context for live session personalization.
 5. Firestore-backed session history with fallback memory store.
 6. Suggested memory actions from History / Insights.
+7. Rule-based proactive push notifications after session close (FCM).
+8. Clinical resource directory: 198 Jakarta ASD resources with REST API and Flutter UI.
 
 ## Why It Matters
 
@@ -42,12 +161,16 @@ flowchart LR
     B --> C[Gemini Live API]
     B --> D[Audio Observer Model]
     B --> E[Visual Observer Model]
-    B --> F[Firestore: sessions, events, profiles, memory, notifications, push tokens]
+    B --> F[Firestore: sessions, events, profiles, memory, notifications, push tokens, clinical_resources]
     B --> G[Secret Manager]
     B --> H[Firebase Admin SDK -> FCM]
     D --> C
     E --> C
     F --> B
+    G --> B
+    H --> A
+    C -->|audio/transcript| A
+```
     G --> B
     H --> A
     C -->|audio/transcript| A
@@ -66,11 +189,14 @@ NeuroDecode/
 |  |- scripts/
 |  |  |- ws_smoke_test.py
 |  |  |- memory_eval_probe.py
+|  |  |- harvest_clinical_places.py
+|  |  |- seed_clinical_resources.py
 |  |- app/
 |  |  |- main.py
 |  |  |- settings.py
 |  |  |- gemini_live.py
 |  |  |- ai_processor.py
+|  |  |- clinical_store.py
 |  |  |- push_sender.py
 |  |  |- push_device_store.py
 |  |  |- notification_store.py
@@ -78,16 +204,17 @@ NeuroDecode/
 |  |  |- models/
 |- neurodecode_mobile/
    |- README.md
-    |- pubspec.yaml
+   |- pubspec.yaml
    |- lib/
       |- features/support/
       |- features/live_agent/
       |- features/home/
       |- features/profile/
-        |- features/home/push_registration_service.dart
-    |- android/
-        |- app/build.gradle
-        |- settings.gradle
+      |- features/clinical/        ← Find Help screen
+      |- features/shell/
+   |- android/
+      |- app/build.gradle
+      |- settings.gradle
 ```
 
 ## Quick Start
@@ -146,9 +273,15 @@ Key HTTP endpoints:
 7. `GET /profiles/{profile_id}/memory-context`
 8. `POST /devices/push-token`
 9. `POST /devices/push-token/deactivate`
-10. `GET /admin/rules/debug` (admin token required)
-11. `GET /admin/push/devices` (admin token required)
-12. `POST /admin/push/test` (admin token required)
+10. `GET /notifications`
+11. `POST /notifications/{id}/read`
+12. `GET /clinical-resources` (optional: `?city=jakarta&resource_type=clinic&limit=50`)
+13. `GET /clinical-resources/{id}`
+14. `POST /admin/clinical-resources` (`X-Admin-Secret` required)
+15. `PATCH /admin/clinical-resources/{id}` (`X-Admin-Secret` required)
+16. `GET /admin/rules/debug` (admin token required)
+17. `GET /admin/push/devices` (admin token required)
+18. `POST /admin/push/test` (admin token required)
 
 WebSocket:
 
