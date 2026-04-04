@@ -34,7 +34,7 @@ steps:
       - '--memory'
       - '4Gi'
       - '--set-secrets'
-      - 'GEMINI_API_KEY=neurodecode-gemini-api-key:latest,NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest,TELEGRAM_BOT_TOKEN=neurodecode-telegram-bot-token:latest,TELEGRAM_CHAT_ID=neurodecode-telegram-chat-id:latest'
+      - 'GEMINI_API_KEY=neurodecode-gemini-api-key:latest,NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest,TELEGRAM_BOT_TOKEN=neurodecode-telegram-bot-token:latest,TELEGRAM_CHAT_ID=neurodecode-telegram-chat-id:latest,NEURODECODE_ADMIN_SECRET=neurodecode-admin-secret:latest'
       - '--set-env-vars'
       - 'NEURODECODE_FIRESTORE_ENABLED=1,NEURODECODE_FIRESTORE_COLLECTION=sessions,NEURODECODE_SUMMARY_MODEL=gemini-2.5-flash-lite,NEURODECODE_ADMIN_DEBUG_ENABLED=1,NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=500,NEURODECODE_FCM_ENABLED=1,NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION=push_device_tokens,NEURODECODE_FOLLOWUP_MIN_DURATION_SECONDS=120,NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT=1,NEURODECODE_FIRESTORE_PROJECT=gen-lang-client-0348071142'
 
