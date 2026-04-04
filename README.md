@@ -14,7 +14,6 @@ Full build history from initial prototype to current state, plus planned next st
 
 ### Phase 0 — MVP ✅ Delivered
 
-*The initial proof-of-concept built for the hackathon. Branch `main` is frozen as a snapshot of this state.*
 
 - Real-time caregiver co-pilot over WebSocket (`/ws/live`).
 - Gemini Live API integration: push-to-talk → AI audio response streamed back.
@@ -98,18 +97,50 @@ Full build history from initial prototype to current state, plus planned next st
 
 ---
 
-### Phase 5 — Time-Delayed Proactive Pipelines 🔲 Planned
+### Phase 5 — Time-Delayed Proactive Pipelines ✅ Delivered
 
 *"Utilizing Cloud Scheduler to send gentle check-in notifications hours after a severe meltdown to monitor the child's recovery."*
 
-- Session severity scoring in the backend post-session.
-- Cloud Scheduler or Cloud Tasks: schedule a delayed push notification 3–6 hours after a high-severity session.
-- Delayed follow-up template: "Hope your little one is recovering — how are things now?"
-- Opt-out / snooze from the notification itself.
+- `followup_engine.py`: scans Firestore for sessions with `followup_scheduled_at` set (high-severity or safety-flagged) and fires FCM follow-up push when the delay window passes.
+- Cloud Scheduler job (`*/15 * * * *`) calls the backend `/admin/followup/process` endpoint every 15 minutes — no Cloud Tasks dependency.
+- FCM delivery confirmed: session `212db6fe` received follow-up push.
+- Telegram delivery confirmed: admin alert channel received the follow-up notification in real time.
+- `followup_sent` Firestore flag prevents duplicate delivery on subsequent scheduler ticks.
+- Two composite Firestore indexes support the followup scan: `followup_sent + followup_scheduled_at`.
 
 ---
 
-### Phase 6 — Longitudinal Analytics Dashboard 🔲 Planned
+### Phase 5.5 — In-App Follow-Up Reply Flow ⏸ Deferred
+
+*Caregivers respond to AI follow-ups directly inside the notification — not just reading them.*
+
+- In-app notification tray with reply input ("How is your child now?").
+- Follow-up response routing back to backend for AI processing.
+- **Status:** FCM banners delivered. In-app reply flow deferred post-hackathon.
+
+---
+
+### Phase 6 — Post-Session Feedback Rating 🔲 Planned
+
+*Short caregiver feedback loop — did this session actually help?*
+
+- 1–5 star rating prompt shown in Flutter after session summary dismissal.
+- `caregiver_rating` field written to the `sessions/` Firestore document.
+- Used downstream to weight intervention effectiveness in profile memory suggestions.
+
+---
+
+### Phase 7 — Knowledge Harvest Agent 🔲 Planned
+
+*Ground Buddy's guidance in current ASD science, not just community posts.*
+
+- PubMed RSS + Autism Speaks RSS → `knowledge_base/` Firestore collection.
+- Gemini call to extract structured intervention evidence per article.
+- Injected alongside community insights as a third context tier during live sessions.
+
+---
+
+### Phase 8 — Longitudinal Analytics Dashboard 🔲 Planned
 
 *"Exporting Firestore session data to BigQuery to help caregivers and therapists visualize trigger trends and intervention success rates over months."*
 
@@ -130,7 +161,8 @@ Current implemented user flow:
 4. Receive Gemini guidance (audio + transcript).
 5. Review post-session summary in History / Insights.
 6. Save suggested memories (trigger/follow-up) to profile memory.
-7. Browse ASD clinics, therapists, and schools in the **Find Help** tab.
+7. Receive proactive follow-up push notification hours after a high-severity session.
+8. Browse ASD clinics, therapists, and schools in the **Find Help** tab.
 
 Major capabilities running in production:
 
@@ -141,7 +173,8 @@ Major capabilities running in production:
 5. Firestore-backed session history with fallback memory store.
 6. Suggested memory actions from History / Insights.
 7. Rule-based proactive push notifications after session close (FCM).
-8. Clinical resource directory: 198 Jakarta ASD resources with REST API and Flutter UI.
+8. Time-delayed follow-up push notifications via Cloud Scheduler (every 15 min scan, FCM delivery confirmed).
+9. Clinical resource directory: 198 Jakarta ASD resources with REST API and Flutter UI.
 
 ## Why It Matters
 
