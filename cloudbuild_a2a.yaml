@@ -1,0 +1,44 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/neurodecode-a2a'
+      - './neurodecode_a2a'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/neurodecode-a2a'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'neurodecode-a2a'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/neurodecode-a2a'
+      - '--region'
+      - 'asia-southeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--service-account'
+      - 'neurodecode-a2a-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--timeout'
+      - '60'
+      - '--concurrency'
+      - '10'
+      - '--memory'
+      - '512Mi'
+      - '--update-secrets'
+      - 'GEMINI_API_KEY=neurodecode-gemini-api-key:latest,A2A_API_KEY=neurodecode-a2a-api-key:latest'
+      - '--set-env-vars'
+      - 'FIRESTORE_PROJECT=gen-lang-client-0348071142,GEMINI_MODEL=gemini-2.0-flash'
+
+images:
+  - 'gcr.io/$PROJECT_ID/neurodecode-a2a'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
