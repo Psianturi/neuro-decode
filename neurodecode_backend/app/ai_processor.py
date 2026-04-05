@@ -178,10 +178,13 @@ class NeuroDecodeAI:
             # Use 90th-percentile activation as proxy: higher when more neurons fire strongly.
             embedding = features[0]  # shape (256,)
             p90 = float(np.percentile(embedding, 90))
-            # p90 of ReLU(Dense(256)) ranges ~0–6; normalize to [0,1] with empirical cap of 4.0
-            raw_score = min(p90 / 4.0, 1.0)
+            p50 = float(np.percentile(embedding, 50))
+            nonzero = int(np.sum(embedding > 0))
+            # p90 of ReLU(Dense(256)) for this model empirically ranges ~0-10.
+            # Cap at 8.0 so score=1.0 only for strongly activated embeddings.
+            raw_score = min(p90 / 8.0, 1.0)
             distress_score = raw_score  # already [0,1], no sigmoid needed
-            print(f"[AI Engine] Audio: p90={p90:.4f} score={distress_score:.4f} threshold=0.68")
+            print(f"[AI Engine] Audio: p90={p90:.4f} p50={p50:.4f} nonzero={nonzero}/256 score={distress_score:.4f} threshold=0.68")
 
             if distress_score > 0.68:
                 return (
