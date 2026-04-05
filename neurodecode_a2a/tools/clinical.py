@@ -2,20 +2,97 @@
 
 - Jakarta / Indonesia: queries the curated NeuroDecode Firestore database (198 resources).
 - All other locations: uses Gemini + Google Search grounding for live global results.
+
+Cost controls:
+- In-memory cache (24h TTL) — prevents duplicate Gemini+Search calls for same location
+- Firestore persistent cache — survives cold starts, shared across instances
+- Rate limit: max 15 web searches per location per hour
 """
 from __future__ import annotations
 
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
 _COLLECTION = "clinical_resources"
+_CACHE_COLLECTION = "a2a_resource_cache"
 _FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "gen-lang-client-0348071142")
 _VALID_TYPES = {"clinic", "therapist", "hospital", "community", "inclusive_school"}
-
-# Keywords that indicate a location covered by the curated Firestore dataset
 _CURATED_KEYWORDS = {"jakarta", "indonesia"}
+
+# In-memory cache: location_key → (result_dict, timestamp)
+_mem_cache: dict[str, tuple[dict, float]] = {}
+_CACHE_TTL = 86400.0  # 24 hours
+
+# Rate limit: location_key → list of call timestamps in current window
+_rate_window: dict[str, list[float]] = {}
+_RATE_LIMIT = 15        # max web searches per location
+_RATE_WINDOW = 3600.0  # per hour
+
+
+def _cache_key(location: str, resource_type: str | None) -> str:
+    return f"{location.lower().strip()}:{resource_type or 'all'}"
+
+
+def _get_mem_cache(key: str) -> dict | None:
+    if key in _mem_cache:
+        result, ts = _mem_cache[key]
+        if time.time() - ts < _CACHE_TTL:
+            return result
+        del _mem_cache[key]
+    return None
+
+
+def _set_mem_cache(key: str, result: dict) -> None:
+    _mem_cache[key] = (result, time.time())
+
+
+def _is_rate_limited(location_key: str) -> bool:
+    now = time.time()
+    calls = _rate_window.get(location_key, [])
+    # Drop calls outside the window
+    calls = [t for t in calls if now - t < _RATE_WINDOW]
+    _rate_window[location_key] = calls
+    return len(calls) >= _RATE_LIMIT
+
+
+def _record_call(location_key: str) -> None:
+    calls = _rate_window.get(location_key, [])
+    calls.append(time.time())
+    _rate_window[location_key] = calls
+
+
+def _get_firestore_cache(key: str) -> dict | None:
+    """Check Firestore persistent cache — survives cold starts."""
+    try:
+        from google.cloud import firestore
+        client = firestore.Client(project=_FIRESTORE_PROJECT)
+        doc = client.collection(_CACHE_COLLECTION).document(key.replace("/", "_")).get()
+        if not doc.exists:
+            return None
+        d = doc.to_dict() or {}
+        cached_at = d.get("cached_at", 0.0)
+        if time.time() - float(cached_at) < _CACHE_TTL:
+            return d.get("result")
+    except Exception:
+        pass
+    return None
+
+
+def _set_firestore_cache(key: str, result: dict) -> None:
+    """Persist result to Firestore cache. Best-effort, non-blocking."""
+    try:
+        from google.cloud import firestore
+        client = firestore.Client(project=_FIRESTORE_PROJECT)
+        client.collection(_CACHE_COLLECTION).document(key.replace("/", "_")).set({
+            "result": result,
+            "cached_at": time.time(),
+            "location_key": key,
+        })
+    except Exception as exc:
+        logger.debug("[find_asd_resources] Firestore cache write failed: %s", exc)
 
 
 def _is_curated(location: str) -> bool:
@@ -126,8 +203,41 @@ def find_asd_resources(
     """
     location = (location or "jakarta").strip()
     limit = max(1, min(int(limit), 20))
+    key = _cache_key(location, resource_type)
 
     if _is_curated(location):
+        # Curated path: no cache needed, Firestore is already fast
         return _firestore_query(resource_type, limit, location)
-    else:
-        return _web_search_query(location, resource_type, limit)
+
+    # Web search path: check cache layers first
+    cached = _get_mem_cache(key)
+    if cached:
+        logger.info("[find_asd_resources] mem cache hit: %s", key)
+        return {**cached, "cached": True}
+
+    cached = _get_firestore_cache(key)
+    if cached:
+        logger.info("[find_asd_resources] Firestore cache hit: %s", key)
+        _set_mem_cache(key, cached)  # warm in-memory cache
+        return {**cached, "cached": True}
+
+    # Rate limit check before calling Gemini+Search
+    if _is_rate_limited(key):
+        logger.warning("[find_asd_resources] Rate limit hit for: %s", key)
+        return {
+            "resources": [],
+            "total": 0,
+            "source": "rate_limited",
+            "location": location,
+            "note": "Too many requests for this location. Please try again in an hour.",
+        }
+
+    _record_call(key)
+    result = _web_search_query(location, resource_type, limit)
+
+    # Cache successful results only
+    if "error" not in result:
+        _set_mem_cache(key, result)
+        _set_firestore_cache(key, result)
+
+    return result
