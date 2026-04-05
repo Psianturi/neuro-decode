@@ -35,8 +35,9 @@ async def agent_card() -> JSONResponse:
     return JSONResponse({
         "name": "NeuroDecode ASD Caregiver Agent",
         "description": (
-            "Real-time ASD caregiver support agent. Finds local ASD clinics, "
-            "therapists, and schools in Jakarta. Provides evidence-based "
+            "Real-time ASD caregiver support agent. Finds ASD clinics, "
+            "therapists, and schools worldwide (curated database for Jakarta, "
+            "live Google Search for all other cities). Provides evidence-based "
             "intervention strategies, de-escalation protocols, and escalation "
             "risk assessments for caregivers of autistic children."
         ),
@@ -58,18 +59,20 @@ async def agent_card() -> JSONResponse:
         "defaultOutputModes": ["text"],
         "skills": [
             {
-                "id": "find_local_resources",
-                "name": "Find Local ASD Resources",
+                "id": "find_asd_resources",
+                "name": "Find ASD Resources",
                 "description": (
                     "Find ASD-relevant clinics, therapists, inclusive schools, "
-                    "hospitals, and community centers in a city. "
-                    "Currently covers 198 resources in Jakarta."
+                    "hospitals, and community centers worldwide. "
+                    "Jakarta / Indonesia: returns 198 curated verified resources. "
+                    "All other cities: live Google Search via Gemini."
                 ),
-                "tags": ["ASD", "resources", "Jakarta", "clinic", "therapist"],
+                "tags": ["ASD", "resources", "global", "clinic", "therapist", "Jakarta"],
                 "examples": [
-                    "Find ASD therapists in Jakarta",
+                    "Find ASD therapists in London",
                     "Cari klinik autis di Jakarta",
-                    "Show me inclusive schools near Jakarta",
+                    "Show me inclusive schools in Singapore",
+                    "ASD support groups in Sydney",
                 ],
             },
             {
