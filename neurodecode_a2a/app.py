@@ -1,21 +1,27 @@
-"""NeuroDecode A2A Agent — FastAPI server."""
+"""NeuroDecode A2A Agent — FastAPI server.
+
+Agent card (public):  GET  /.well-known/agent-card.json
+Health check:         GET  /health
+A2A endpoint (auth):  POST /   (requires X-API-Key header, enforced by middleware)
+"""
 from __future__ import annotations
 
-import os
 import logging
+import os
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 load_dotenv()
 
-from middleware import load_api_keys, require_api_key  # noqa: E402
+from middleware import ApiKeyMiddleware, load_api_keys  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NeuroDecode A2A Agent")
+app.add_middleware(ApiKeyMiddleware)
 
 _SERVICE_URL = os.getenv(
     "A2A_SERVICE_URL",
@@ -26,12 +32,12 @@ _SERVICE_URL = os.getenv(
 @app.on_event("startup")
 async def startup() -> None:
     load_api_keys()
-    logger.info("[startup] NeuroDecode A2A Agent ready — %s", _SERVICE_URL)
+    logger.info("[startup] NeuroDecode A2A Agent ready -- %s", _SERVICE_URL)
 
 
 @app.get("/.well-known/agent-card.json", include_in_schema=False)
 async def agent_card() -> JSONResponse:
-    """A2A agent card — fetched by Prompt Opinion during registration."""
+    """A2A agent card -- fetched by Prompt Opinion during registration."""
     return JSONResponse({
         "name": "NeuroDecode ASD Caregiver Agent",
         "description": (
@@ -43,6 +49,8 @@ async def agent_card() -> JSONResponse:
         ),
         "url": _SERVICE_URL,
         "version": "1.0.0",
+        "protocolVersion": "0.2.2",
+        "preferredTransport": "JSONRPC",
         "provider": {
             "organization": "NeuroDecode AI",
             "url": "https://github.com/Psianturi/neuro-decode",
@@ -124,11 +132,9 @@ async def health() -> dict:
     return {"status": "ok", "agent": "neurodecode-a2a"}
 
 
-# A2A endpoint — ADK handles routing via its own runner
-# Import here to avoid circular imports at module level
-@app.post("/", dependencies=[Depends(require_api_key)])
+@app.post("/")
 async def a2a_endpoint(request: dict) -> dict:
-    """Main A2A JSON-RPC endpoint."""
+    """Main A2A JSON-RPC endpoint. API key enforced by ApiKeyMiddleware."""
     try:
         from google.adk.runners import Runner
         from google.adk.sessions import InMemorySessionService
@@ -142,7 +148,7 @@ async def a2a_endpoint(request: dict) -> dict:
             session_service=session_service,
         )
 
-        # Extract message from A2A request format
+        # Extract message from A2A JSON-RPC request format
         params = request.get("params", {})
         message_text = ""
         if isinstance(params, dict):
@@ -155,7 +161,11 @@ async def a2a_endpoint(request: dict) -> dict:
                         break
 
         if not message_text:
-            return {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": -32600, "message": "No text content in request"}}
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "error": {"code": -32600, "message": "No text content in request"},
+            }
 
         session_id = params.get("sessionId", "default")
         user_id = params.get("userId", "a2a-user")

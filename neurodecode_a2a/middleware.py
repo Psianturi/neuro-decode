@@ -1,28 +1,45 @@
-"""API key middleware — loaded once at startup from Secret Manager or env."""
+"""API key middleware — validates X-API-Key on all requests except agent card."""
 from __future__ import annotations
 
-import os
 import logging
+import os
 
-from fastapi import Header, HTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-_valid_keys: set[str] = set()
+_VALID_KEYS: set[str] = set()
 
 
 def load_api_keys() -> None:
-    """Call once at startup. Loads key from env (set via Secret Manager mount)."""
+    """Load API key from environment variable (injected by Cloud Run --update-secrets)."""
     key = (os.getenv("A2A_API_KEY") or "").strip()
     if key:
-        _valid_keys.add(key)
-        logger.info("[middleware] A2A API key loaded")
+        _VALID_KEYS.add(key)
+        logger.info("[startup] A2A API key loaded (%d chars)", len(key))
     else:
-        logger.warning("[middleware] A2A_API_KEY not set — all requests will be rejected")
+        logger.warning("[startup] A2A_API_KEY not set — all requests will be rejected")
 
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    if not _valid_keys:
-        raise HTTPException(status_code=503, detail="API key not configured")
-    if not x_api_key or x_api_key.strip() not in _valid_keys:
-        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Agent card is always public
+        if "/.well-known/" in request.url.path:
+            return await call_next(request)
+
+        api_key = request.headers.get("X-API-Key", "")
+        if not api_key:
+            logger.warning("security_rejected_missing_api_key path=%s", request.url.path)
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized", "detail": "X-API-Key header is required"},
+            )
+        if api_key not in _VALID_KEYS:
+            logger.warning("security_rejected_invalid_api_key key_prefix=%s", api_key[:6])
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Forbidden", "detail": "Invalid API key"},
+            )
+        return await call_next(request)
