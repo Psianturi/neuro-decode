@@ -74,12 +74,22 @@ class ClinicalStore:
         """Return clinical resources, optionally filtered by city / type."""
         ref = self._db.collection(self._col)
 
+        try:
+            from google.cloud.firestore_v1.base_query import FieldFilter as _FF
+        except ImportError:
+            _FF = None
+
+        def _where(ref, field, value):
+            if _FF is not None:
+                return ref.where(filter=_FF(field, "==", value))
+            return ref.where(field, "==", value)
+
         if active_only:
-            ref = ref.where("is_active", "==", True)
+            ref = _where(ref, "is_active", True)
         if city:
-            ref = ref.where("city", "==", city.lower())
+            ref = _where(ref, "city", city.lower())
         if resource_type:
-            ref = ref.where("resource_type", "==", resource_type.lower())
+            ref = _where(ref, "resource_type", resource_type.lower())
 
         docs = ref.limit(limit).stream()
         results = []

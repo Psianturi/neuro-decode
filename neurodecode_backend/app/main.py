@@ -656,7 +656,7 @@ async def _load_profile_memory_context(
     filtered_insights: list[dict[str, object]] = []
     if firestore_project and profile:
         try:
-            from app.moltbook.agents.community_store import list_recent as list_community_insights
+            from app.community_store import list_recent as list_community_insights
             raw_insights = await list_community_insights(
                 project=firestore_project,
                 limit=20,
