@@ -173,9 +173,15 @@ class NeuroDecodeAI:
             input_data = np.expand_dims(np.expand_dims(mfcc_scaled, axis=0), axis=2)
 
             features = self._audio_extractor.predict(input_data, verbose=0)
-            raw_score = float(np.mean(np.abs(features[0])))
-            distress_score = self._sigmoid(raw_score)
-            print(f"[AI Engine] Audio: raw={raw_score:.4f} sigmoid={distress_score:.4f} threshold=0.68")
+            # Model output is a 256-dim ReLU embedding (feature extractor, not classifier).
+            # np.mean(abs) collapses to ~1.66 for all inputs — not discriminative.
+            # Use 90th-percentile activation as proxy: higher when more neurons fire strongly.
+            embedding = features[0]  # shape (256,)
+            p90 = float(np.percentile(embedding, 90))
+            # p90 of ReLU(Dense(256)) ranges ~0–6; normalize to [0,1] with empirical cap of 4.0
+            raw_score = min(p90 / 4.0, 1.0)
+            distress_score = raw_score  # already [0,1], no sigmoid needed
+            print(f"[AI Engine] Audio: p90={p90:.4f} score={distress_score:.4f} threshold=0.68")
 
             if distress_score > 0.68:
                 return (
