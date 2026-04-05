@@ -23,10 +23,23 @@ def load_api_keys() -> None:
         logger.warning("[startup] A2A_API_KEY not set — all requests will be rejected")
 
 
+def require_api_key(request: Request) -> bool:
+    """Return True if the request must be authenticated.
+
+    Auth is skipped when A2A_REQUIRE_AUTH=0 (since Prompt Opinion platform does not forward API keys by default).
+    Set A2A_REQUIRE_AUTH=1 to enforce in private/production use.
+    """
+    return os.getenv("A2A_REQUIRE_AUTH", "0").strip() == "1"
+
+
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Agent card is always public
-        if "/.well-known/" in request.url.path:
+        # Agent card and health check are always public
+        if "/.well-known/" in request.url.path or request.url.path == "/health":
+            return await call_next(request)
+
+        # Auth enforcement controlled by env var
+        if not require_api_key(request):
             return await call_next(request)
 
         api_key = request.headers.get("X-API-Key", "")
