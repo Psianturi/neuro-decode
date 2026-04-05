@@ -170,7 +170,8 @@ async def a2a_endpoint(request: dict) -> dict:
         session_id = params.get("sessionId", "default")
         user_id = params.get("userId", "a2a-user")
 
-        session = await session_service.create_session(
+        # create_session is synchronous in google-adk 0.4.0
+        session = session_service.create_session(
             app_name="neurodecode_a2a",
             user_id=user_id,
             session_id=session_id,
