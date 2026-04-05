@@ -796,6 +796,17 @@ async def sessions_list(
     }
 
 
+@app.patch("/sessions/{session_id}/rate")
+async def sessions_rate(
+    session_id: str,
+    rating: int,
+) -> dict[str, object]:
+    if rating < 1 or rating > 5:
+        return {"status": "error", "message": "rating must be 1–5"}
+    await session_store.rate_session(session_id, rating)
+    return {"status": "ok", "session_id": session_id, "caregiver_rating": rating}
+
+
 @app.post("/sessions/process-followups")
 async def sessions_process_followups(
     admin_token: str | None = None,

@@ -6,6 +6,7 @@ import '../../config/app_identity_store.dart';
 
 class SessionSummary {
   const SessionSummary({
+    required this.sessionId,
     required this.timestampUtc,
     required this.durationMinutes,
     required this.closeReason,
@@ -17,8 +18,10 @@ class SessionSummary {
     required this.agentActions,
     required this.followUp,
     required this.safetyNote,
+    this.caregiverRating,
   });
 
+  final String sessionId;
   final String timestampUtc;
   final int durationMinutes;
   final String closeReason;
@@ -30,6 +33,7 @@ class SessionSummary {
   final String agentActions;
   final String followUp;
   final String safetyNote;
+  final int? caregiverRating;
 
   String get closeReasonLabel {
     switch (closeReason) {
@@ -77,7 +81,15 @@ class SessionSummary {
       return text.isEmpty ? fallback : text;
     }
 
+    int? parseOptionalInt(dynamic value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value);
+      return null;
+    }
+
     return SessionSummary(
+      sessionId: pick(json, 'id', pick(json, 'session_id', '')),
       timestampUtc: pick(json, 'timestamp_utc', '-'),
       durationMinutes: parseInt(json['duration_minutes'], 0),
       closeReason: pick(json, 'close_reason', '-'),
@@ -89,6 +101,7 @@ class SessionSummary {
       agentActions: pick(structured, 'agent_actions', '-'),
       followUp: pick(structured, 'follow_up', '-'),
       safetyNote: pick(structured, 'safety_note', '-'),
+      caregiverRating: parseOptionalInt(json['caregiver_rating']),
     );
   }
 }
@@ -167,5 +180,28 @@ class SessionSummaryService {
       }
     }
     return out;
+  }
+
+  Future<void> rateSession(String sessionId, int rating) async {
+    final userId = await _identityStore.getOrCreateUserId();
+    final uri = Uri.parse(
+      'https://${AppConfig.backendUrl}/sessions/$sessionId/rate',
+    ).replace(queryParameters: {'rating': rating.toString(), 'user_id': userId});
+
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 8);
+    try {
+      final request = await client.patchUrl(uri);
+      final response = await request.close();
+      await response.drain<void>();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'Rate session failed (\${response.statusCode})',
+          uri: uri,
+        );
+      }
+    } finally {
+      client.close(force: true);
+    }
   }
 }

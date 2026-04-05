@@ -284,3 +284,21 @@ class SessionStore:
         except Exception as e:
             print(f"[session_store] mark_followup_sent failed: {e}")
             return False
+
+    def _rate_session_firestore(self, session_id: str, rating: int) -> None:
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("Firestore client unavailable")
+        client.collection(self._firestore_collection).document(session_id).set(
+            {"caregiver_rating": rating},
+            merge=True,
+        )
+
+    async def rate_session(self, session_id: str, rating: int) -> None:
+        """Persist a 1–5 caregiver rating on a session document. Best-effort."""
+        if not self._firestore_enabled:
+            return
+        try:
+            await asyncio.to_thread(self._rate_session_firestore, session_id, rating)
+        except Exception as e:
+            print(f"[session_store] rate_session failed: {e}")

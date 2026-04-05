@@ -153,6 +153,7 @@ class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
                 _SessionCard(
                   summary: item,
                   onSaveSuggestion: _saveSuggestedMemory,
+                  service: widget.service,
                 ),
             ],
           ],
@@ -162,15 +163,46 @@ class _HistoryInsightsScreenState extends State<HistoryInsightsScreen> {
   }
 }
 
-class _SessionCard extends StatelessWidget {
+class _SessionCard extends StatefulWidget {
   const _SessionCard({
     required this.summary,
     required this.onSaveSuggestion,
+    required this.service,
   });
 
   final SessionSummary summary;
   final Future<void> Function({required String category, required String note})
       onSaveSuggestion;
+  final SessionSummaryService service;
+
+  @override
+  State<_SessionCard> createState() => _SessionCardState();
+}
+
+class _SessionCardState extends State<_SessionCard> {
+  late int? _rating;
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rating = widget.summary.caregiverRating;
+  }
+
+  Future<void> _submitRating(int stars) async {
+    if (_submitting || widget.summary.sessionId.isEmpty) return;
+    setState(() {
+      _submitting = true;
+      _rating = stars;
+    });
+    try {
+      await widget.service.rateSession(widget.summary.sessionId, stars);
+    } catch (_) {
+      // Best-effort — local state already updated optimistically.
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,7 +214,7 @@ class _SessionCard extends StatelessWidget {
           tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
           title: Text(
-            summary.title,
+            widget.summary.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w700),
@@ -191,10 +223,10 @@ class _SessionCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${_formatTime(summary.timestampUtc)} • ${summary.durationMinutes} min • ${summary.closeReasonLabel}',
+                '${_formatTime(widget.summary.timestampUtc)} • ${widget.summary.durationMinutes} min • ${widget.summary.closeReasonLabel}',
                 style: const TextStyle(color: NeuroColors.textSecondary),
               ),
-              if (summary.memoryAssisted)
+              if (widget.summary.memoryAssisted)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Container(
@@ -206,9 +238,9 @@ class _SessionCard extends StatelessWidget {
                       border: Border.all(color: NeuroColors.primary),
                     ),
                     child: Text(
-                      summary.memoryProfileId.isEmpty
+                      widget.summary.memoryProfileId.isEmpty
                           ? 'Memory Assisted'
-                          : 'Memory Assisted • ${summary.memoryProfileId}',
+                          : 'Memory Assisted • ${widget.summary.memoryProfileId}',
                       style: const TextStyle(
                         color: NeuroColors.primary,
                         fontWeight: FontWeight.w700,
@@ -224,60 +256,90 @@ class _SessionCard extends StatelessWidget {
             _DetailRow(
               icon: Icons.visibility,
               label: 'Visual Trigger',
-              text: summary.triggersVisual,
+              text: widget.summary.triggersVisual,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.hearing,
               label: 'Audio Trigger',
-              text: summary.triggersAudio,
+              text: widget.summary.triggersAudio,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.psychology_alt,
               label: 'Agent Action',
-              text: summary.agentActions,
+              text: widget.summary.agentActions,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.lightbulb,
               label: 'Follow-up',
-              text: summary.followUp,
+              text: widget.summary.followUp,
             ),
             const SizedBox(height: 8),
             _DetailRow(
               icon: Icons.health_and_safety,
               label: 'Safety Note',
-              text: summary.safetyNote,
+              text: widget.summary.safetyNote,
             ),
             const SizedBox(height: 12),
+            // Star rating row
+            Row(
+              children: [
+                const Text(
+                  'Rate this session:',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: NeuroColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                for (int star = 1; star <= 5; star++)
+                  GestureDetector(
+                    onTap: _submitting ? null : () => _submitRating(star),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Icon(
+                        (_rating != null && star <= _rating!)
+                            ? Icons.star
+                            : Icons.star_border,
+                        size: 26,
+                        color: (_rating != null && star <= _rating!)
+                            ? Colors.amber
+                            : NeuroColors.textSecondary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (summary.triggersAudio != '-')
+                if (widget.summary.triggersAudio != '-')
                   OutlinedButton.icon(
-                    onPressed: () => onSaveSuggestion(
+                    onPressed: () => widget.onSaveSuggestion(
                       category: 'trigger',
-                      note: 'Audio trigger pattern: ${summary.triggersAudio}',
+                      note: 'Audio trigger pattern: ${widget.summary.triggersAudio}',
                     ),
                     icon: const Icon(Icons.hearing, size: 18),
                     label: const Text('Save audio trigger'),
                   ),
-                if (summary.triggersVisual != '-')
+                if (widget.summary.triggersVisual != '-')
                   OutlinedButton.icon(
-                    onPressed: () => onSaveSuggestion(
+                    onPressed: () => widget.onSaveSuggestion(
                       category: 'trigger',
-                      note: 'Visual trigger pattern: ${summary.triggersVisual}',
+                      note: 'Visual trigger pattern: ${widget.summary.triggersVisual}',
                     ),
                     icon: const Icon(Icons.visibility, size: 18),
                     label: const Text('Save visual trigger'),
                   ),
-                if (summary.followUp != '-')
+                if (widget.summary.followUp != '-')
                   OutlinedButton.icon(
-                    onPressed: () => onSaveSuggestion(
+                    onPressed: () => widget.onSaveSuggestion(
                       category: 'routine',
-                      note: 'Follow-up guidance: ${summary.followUp}',
+                      note: 'Follow-up guidance: ${widget.summary.followUp}',
                     ),
                     icon: const Icon(Icons.lightbulb, size: 18),
                     label: const Text('Save follow-up'),
