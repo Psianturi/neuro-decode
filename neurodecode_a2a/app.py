@@ -186,19 +186,24 @@ async def a2a_endpoint(request: dict) -> dict:
             session_id=session.id,
             new_message=content,
         ):
-            # Diagnostic logging — understand ADK 0.4.0 event structure
             is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
             has_content = bool(event.content and event.content.parts) if hasattr(event, "content") else False
             author = getattr(event, "author", "?")
-            logger.info("[a2a][event] author=%s final=%s has_content=%s", author, is_final, has_content)
+            # Log full event repr so we can see ALL attributes
+            try:
+                logger.info("[a2a][event] author=%s final=%s has_content=%s repr=%s",
+                            author, is_final, has_content, repr(event)[:600])
+            except Exception:
+                pass
             if has_content:
                 for i, part in enumerate(event.content.parts):
                     txt = getattr(part, "text", None)
-                    logger.info("[a2a][event] part[%d] type=%s text_len=%s preview=%s",
+                    fn_resp = getattr(part, "function_response", None)
+                    logger.info("[a2a][event] part[%d] type=%s text_len=%s fn_resp=%s",
                                 i, type(part).__name__, len(txt) if txt else 0,
-                                repr(txt[:120] if txt else None))
+                                repr(fn_resp)[:200] if fn_resp else None)
                     if txt:
-                        response_text = txt  # keep last non-empty text
+                        response_text = txt
 
         return {
             "jsonrpc": "2.0",
