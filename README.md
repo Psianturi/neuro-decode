@@ -144,6 +144,8 @@ Full build history from initial prototype to current state, plus planned next st
 - 3-layer cost control: in-memory LRU cache → Firestore 24h TTL cache → 5 req/hr rate limit per location.
 - Optional API key auth via `ApiKeyMiddleware` (`A2A_REQUIRE_AUTH` env flag).
 - Dedicated Cloud Build pipeline (`cloudbuild_a2a.yaml`) — separate from main backend deployments.
+- **Published on Prompt Opinion Marketplace**: [AnakUnggul - ASD Caregiver Agent](https://app.promptopinion.ai/marketplace/agent/019d5ea9-5b99-7cc2-9e66-387e21cef16a)
+- Agent card live at `https://neurodecode-a2a-jzfv6ygw3q-as.a.run.app/.well-known/agent-card.json`
 
 ---
 
