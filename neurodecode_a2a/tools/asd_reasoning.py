@@ -62,8 +62,7 @@ def suggest_interventions(
         "Provide 3-5 specific, immediately actionable interventions. "
         "Format as a numbered list. Include rationale for each."
     )
-    text = _gemini_call(prompt)
-    return {"trigger_type": trigger_type, "child_age": child_age, "interventions": text}
+    return _gemini_call(prompt)
 
 
 def get_de_escalation_steps(
@@ -94,11 +93,7 @@ def get_de_escalation_steps(
         "FOLLOW UP: (what to do after the situation calms)"
     )
     text = _gemini_call(prompt, max_tokens=600)
-    return {
-        "urgency_level": urgency_level,
-        "situation": situation_description[:100] + "..." if len(situation_description) > 100 else situation_description,
-        "protocol": text,
-    }
+    return text
 
 
 def assess_escalation_risk(
@@ -141,21 +136,4 @@ def assess_escalation_risk(
         "RECOMMENDED_ACTIONS: [3 specific actions for the caregiver right now]"
     )
     text = _gemini_call(prompt, max_tokens=400)
-
-    # Parse risk level from response
-    risk_level = "medium"
-    for line in text.splitlines():
-        if line.startswith("RISK_LEVEL:"):
-            val = line.split(":", 1)[1].strip().lower()
-            if val in {"low", "medium", "high", "critical"}:
-                risk_level = val
-            break
-
-    return {
-        "risk_level": risk_level,
-        "assessment": text,
-        "input_summary": {
-            "audio": audio_pattern_description[:80],
-            "visual": visual_pattern_description[:80] if visual_pattern_description else None,
-        },
-    }
+    return text

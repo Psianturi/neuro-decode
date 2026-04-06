@@ -181,29 +181,34 @@ async def a2a_endpoint(request: dict) -> dict:
         )
 
         response_text = ""
+        all_events = []
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session.id,
             new_message=content,
         ):
             is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
-            has_content = bool(event.content and event.content.parts) if hasattr(event, "content") else False
+            error_code = getattr(event, "error_code", None)
             author = getattr(event, "author", "?")
-            # Log full event repr so we can see ALL attributes
-            try:
-                logger.info("[a2a][event] author=%s final=%s has_content=%s repr=%s",
-                            author, is_final, has_content, repr(event)[:600])
-            except Exception:
-                pass
-            if has_content:
+
+            if hasattr(event, "content") and event.content and event.content.parts:
                 for i, part in enumerate(event.content.parts):
                     txt = getattr(part, "text", None)
+                    fn_call = getattr(part, "function_call", None)
                     fn_resp = getattr(part, "function_response", None)
-                    logger.info("[a2a][event] part[%d] type=%s text_len=%s fn_resp=%s",
-                                i, type(part).__name__, len(txt) if txt else 0,
-                                repr(fn_resp)[:200] if fn_resp else None)
+                    logger.info(
+                        "[a2a][event] author=%s final=%s err=%s part[%d] "
+                        "text=%s fn_call=%s fn_resp_keys=%s",
+                        author, is_final, error_code, i,
+                        repr(txt[:300]) if txt else None,
+                        repr(fn_call)[:200] if fn_call else None,
+                        list(fn_resp.response.keys()) if fn_resp and hasattr(fn_resp, "response") else None,
+                    )
                     if txt:
                         response_text = txt
+            else:
+                logger.info("[a2a][event] author=%s final=%s err=%s content=None",
+                            author, is_final, error_code)
 
         return {
             "jsonrpc": "2.0",

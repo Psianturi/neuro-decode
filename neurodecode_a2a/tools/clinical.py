@@ -8,6 +8,7 @@ Cost controls:
 - Firestore persistent cache — survives cold starts, shared across instances
 - Rate limit: max 15 web searches per location per hour
 """
+import json
 import logging
 import os
 import time
@@ -193,28 +194,28 @@ def find_asd_resources(
     key = _cache_key(location, rtype)
 
     if _is_curated(location):
-        return _firestore_query(rtype, limit, location)
+        return json.dumps(_firestore_query(rtype, limit, location), ensure_ascii=False, default=str)
 
     cached = _get_mem_cache(key)
     if cached:
         logger.info("[find_asd_resources] mem cache hit: %s", key)
-        return {**cached, "cached": True}
+        return json.dumps({**cached, "cached": True}, ensure_ascii=False, default=str)
 
     cached = _get_firestore_cache(key)
     if cached:
         logger.info("[find_asd_resources] Firestore cache hit: %s", key)
         _set_mem_cache(key, cached)
-        return {**cached, "cached": True}
+        return json.dumps({**cached, "cached": True}, ensure_ascii=False, default=str)
 
     if _is_rate_limited(key):
         logger.warning("[find_asd_resources] Rate limit hit for: %s", key)
-        return {
+        return json.dumps({
             "resources": [],
             "total": 0,
             "source": "rate_limited",
             "location": location,
             "note": "Too many requests for this location. Please try again in an hour.",
-        }
+        }, ensure_ascii=False)
 
     _record_call(key)
     result = _web_search_query(location, rtype, limit)
@@ -223,4 +224,4 @@ def find_asd_resources(
         _set_mem_cache(key, result)
         _set_firestore_cache(key, result)
 
-    return result
+    return json.dumps(result, ensure_ascii=False, default=str)
