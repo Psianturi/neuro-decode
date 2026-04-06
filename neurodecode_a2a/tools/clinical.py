@@ -32,7 +32,7 @@ _RATE_LIMIT = 15        # max web searches per location
 _RATE_WINDOW = 3600.0  # per hour
 
 
-def _cache_key(location: str, resource_type: str) -> str:
+def _cache_key(location: str, resource_type: str | None) -> str:
     return f"{location.lower().strip()}:{resource_type or 'all'}"
 
 
@@ -100,7 +100,7 @@ def _is_curated(location: str) -> bool:
     return any(kw in loc for kw in _CURATED_KEYWORDS)
 
 
-def _firestore_query(resource_type: str, limit: int, location: str) -> dict:
+def _firestore_query(resource_type: str | None, limit: int, location: str) -> dict:
     try:
         from google.cloud import firestore
         from google.cloud.firestore_v1.base_query import FieldFilter
@@ -135,7 +135,7 @@ def _firestore_query(resource_type: str, limit: int, location: str) -> dict:
         return {"resources": [], "total": 0, "source": "curated", "error": str(exc), "location": location}
 
 
-def _web_search_query(location: str, resource_type: str, limit: int) -> dict:
+def _web_search_query(location: str, resource_type: str | None, limit: int) -> dict:
     try:
         from google import genai
         from google.genai import types as genai_types
@@ -174,7 +174,7 @@ def _web_search_query(location: str, resource_type: str, limit: int) -> dict:
 
 def find_asd_resources(
     location: str = "jakarta",
-    resource_type: str = "",
+    resource_type: str | None = None,
     limit: int = 10,
 ) -> dict:
     """
@@ -191,7 +191,7 @@ def find_asd_resources(
         location: City or location to search in. Examples: 'jakarta', 'singapore',
                   'london', 'new york', 'sydney', 'kuala lumpur'. Default: 'jakarta'.
         resource_type: Filter by type — one of: clinic, therapist, hospital,
-                       community, inclusive_school. Leave empty for all types.
+                       community, inclusive_school. Omit for all types.
         limit: Maximum number of results to return (1-20). Default: 10.
 
     Returns:
@@ -202,13 +202,14 @@ def find_asd_resources(
         Search), 'source': 'web_search', 'location', 'note'.
     """
     location = (location or "jakarta").strip()
-    rtype = resource_type.strip() if resource_type else ""
     limit = max(1, min(int(limit), 20))
-    key = _cache_key(location, rtype)
+    key = _cache_key(location, resource_type)
 
     if _is_curated(location):
-        return _firestore_query(rtype, limit, location)
+        # Curated path: no cache needed, Firestore is already fast
+        return _firestore_query(resource_type, limit, location)
 
+    # Web search path: check cache layers first
     cached = _get_mem_cache(key)
     if cached:
         logger.info("[find_asd_resources] mem cache hit: %s", key)
@@ -217,9 +218,10 @@ def find_asd_resources(
     cached = _get_firestore_cache(key)
     if cached:
         logger.info("[find_asd_resources] Firestore cache hit: %s", key)
-        _set_mem_cache(key, cached)
+        _set_mem_cache(key, cached)  # warm in-memory cache
         return {**cached, "cached": True}
 
+    # Rate limit check before calling Gemini+Search
     if _is_rate_limited(key):
         logger.warning("[find_asd_resources] Rate limit hit for: %s", key)
         return {
@@ -231,8 +233,9 @@ def find_asd_resources(
         }
 
     _record_call(key)
-    result = _web_search_query(location, rtype, limit)
+    result = _web_search_query(location, resource_type, limit)
 
+    # Cache successful results only
     if "error" not in result:
         _set_mem_cache(key, result)
         _set_firestore_cache(key, result)
