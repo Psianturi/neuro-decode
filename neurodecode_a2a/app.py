@@ -186,10 +186,12 @@ async def a2a_endpoint(request: dict) -> dict:
             session_id=session.id,
             new_message=content,
         ):
-            if event.is_final_response() and event.content:
+            # ADK 0.4.0: collect text from all events that have content
+            # is_final_response() may not work reliably — collect all text parts
+            if event.content and event.content.parts:
                 for part in event.content.parts:
                     if hasattr(part, "text") and part.text:
-                        response_text += part.text
+                        response_text = part.text  # keep last non-empty text
 
         return {
             "jsonrpc": "2.0",
