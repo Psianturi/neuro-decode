@@ -205,7 +205,7 @@ async def a2a_endpoint(request: dict) -> dict:
                         list(fn_resp.response.keys()) if fn_resp and hasattr(fn_resp, "response") else None,
                     )
                     if txt:
-                        response_text = txt
+                        response_text = txt.decode("utf-8") if isinstance(txt, bytes) else str(txt)
             else:
                 logger.info("[a2a][event] author=%s final=%s err=%s content=None",
                             author, is_final, error_code)
