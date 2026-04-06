@@ -120,17 +120,34 @@ Full build history from initial prototype to current state, plus planned next st
 
 ---
 
-### Phase 6 — Post-Session Feedback Rating 🔲 Planned
+### Phase 6 — Post-Session Feedback Rating ✅ Delivered
 
 *Short caregiver feedback loop — did this session actually help?*
 
-- 1–5 star rating prompt shown in Flutter after session summary dismissal.
-- `caregiver_rating` field written to the `sessions/` Firestore document.
+- 1–5 star tappable rating shown in each session card inside the History / Insights screen.
+- `PATCH /sessions/{session_id}/rate` endpoint writes `caregiver_rating` to the `sessions/` Firestore document.
+- Optimistic UI update in Flutter — star selection locks immediately while the request completes in the background.
 - Used downstream to weight intervention effectiveness in profile memory suggestions.
 
 ---
 
-### Phase 7 — Knowledge Harvest Agent 🔲 Planned
+### Phase 7 — A2A Agent Protocol ✅ Delivered
+
+*Expose NeuroDecode's caregiver tools as a standards-compliant A2A (Agent-to-Agent) service so any AI platform or orchestrator can invoke them.*
+
+- `neurodecode_a2a` microservice: Google ADK `Agent` wrapping 4 callable tools, deployed as a separate Cloud Run service.
+- `find_asd_resources` — Jakarta uses curated Firestore database (198 resources); all other cities hit live Google Search + Gemini for real-time results worldwide.
+- `suggest_interventions` — evidence-based strategies for a given ASD trigger (e.g. "loud noise sensitivity").
+- `get_de_escalation_steps` — step-by-step active-distress protocol for caregivers.
+- `assess_escalation_risk` — structured risk assessment from a behavioral pattern description.
+- A2A agent card at `/.well-known/agent-card.json` (protocolVersion 0.2.2, preferredTransport JSONRPC).
+- 3-layer cost control: in-memory LRU cache → Firestore 24h TTL cache → 5 req/hr rate limit per location.
+- Optional API key auth via `ApiKeyMiddleware` (`A2A_REQUIRE_AUTH` env flag).
+- Dedicated Cloud Build pipeline (`cloudbuild_a2a.yaml`) — separate from main backend deployments.
+
+---
+
+### Phase 8 — Knowledge Harvest Agent 🔲 Planned
 
 *Ground Buddy's guidance in current ASD science, not just community posts.*
 
@@ -140,7 +157,7 @@ Full build history from initial prototype to current state, plus planned next st
 
 ---
 
-### Phase 8 — Longitudinal Analytics Dashboard 🔲 Planned
+### Phase 9 — Longitudinal Analytics Dashboard 🔲 Planned
 
 *"Exporting Firestore session data to BigQuery to help caregivers and therapists visualize trigger trends and intervention success rates over months."*
 
@@ -189,34 +206,36 @@ NeuroDecode reduces caregiver cognitive load with a live loop:
 ## Architecture (High-Level)
 
 ```mermaid
-flowchart TD
-    subgraph Flutter["Flutter Mobile App (Android)"]
-        F_UI[Live Support / History / Find Help / Buddy tabs]
-        F_PCM[Native Android PCM AudioTrack]
+flowchart LR
+    subgraph Mobile["Flutter Mobile — Android"]
+        F_UI[Live Support / History / Find Help / Buddy]
+        F_PCM[Native PCM AudioTrack 24kHz]
     end
 
     subgraph Backend["FastAPI Backend — Cloud Run asia-southeast1"]
         B_WS[WebSocket /ws/live]
-        B_HTTP[HTTP REST endpoints]
+        B_HTTP[HTTP REST API]
         B_AUDIO[Audio Observer CNN]
         B_VIS[Visual Observer VGG16]
-        B_FOLLOW[followup_engine.py]
-        B_RULES[Rule-based notification engine]
-        B_CLINICAL[clinical_store.py]
         B_PROFILE[profile_store / memory_context]
         B_RELEVANCE[RelevanceFilterAgent]
+        B_RULES[Notification Engine]
+        B_FOLLOW[followup_engine]
+        B_CLINICAL[clinical_store — 198 resources]
     end
 
-    subgraph Moltbook["neurodecode-moltbook — Cloud Run separate service"]
+    subgraph A2AService["NeuroDecode A2A Agent — Cloud Run"]
+        A_AGENT[ADK Agent: neurodecode_asd_agent]
+        A_T1[find_asd_resources]
+        A_T2[suggest_interventions]
+        A_T3[get_de_escalation_steps]
+        A_T4[assess_escalation_risk]
+    end
+
+    subgraph Moltbook["neurodecode-moltbook — Cloud Run"]
         M_HEART[Heartbeat loop]
         M_EXTRACT[extract_community_insight]
         M_PERSONA[Persona pool 5 agents]
-    end
-
-    subgraph GCP["Google Cloud Platform"]
-        GCS[Cloud Scheduler every 15 min]
-        SM[Secret Manager]
-        CB[Cloud Build CI/CD]
     end
 
     subgraph Firestore["Firestore Collections"]
@@ -224,40 +243,52 @@ flowchart TD
         FS_P[profile_memory]
         FS_CI[community_insights]
         FS_N[notifications]
-        FS_PT[push_device_tokens]
-        FS_CR[clinical_resources 198 resources]
-        FS_KB[knowledge_base planned]
+        FS_CR[clinical_resources — 198]
     end
 
-    Flutter -->|wss /ws/live push-to-talk| B_WS
-    Flutter -->|HTTP GET profiles notifications clinical| B_HTTP
-    B_WS --> Gemini[Gemini Live API]
+    Gemini([Gemini Live API])
+    FCM([Firebase FCM])
+    GCS([Cloud Scheduler every 15 min])
+    CB([Cloud Build CI/CD])
+    Telegram([Telegram Admin Channel])
+    SearchAPI([Google Search + Gemini])
+    MoltAPI([Moltbook API])
+
+    Mobile -->|wss /ws/live| B_WS
+    Mobile -->|HTTP GET/PATCH| B_HTTP
+    B_WS --> Gemini
     Gemini -->|audio + transcript| F_PCM
     B_WS --> B_AUDIO
     B_WS --> B_VIS
     B_AUDIO -->|heuristic signal| Gemini
     B_VIS -->|heuristic signal| Gemini
     B_WS --> B_PROFILE
-    B_PROFILE --> FS_P
+    B_WS --> B_RELEVANCE
+    B_PROFILE <--> FS_P
     B_RELEVANCE --> FS_CI
-    B_RELEVANCE -->|relevant insights injected| Gemini
+    B_RELEVANCE -->|insights injected| Gemini
     B_WS --> B_RULES
-    B_RULES --> FCM[Firebase Admin SDK → FCM]
-    FCM -->|push notification| Flutter
-    GCS -->|POST /admin/followup/process| B_FOLLOW
+    B_RULES --> FCM
+    FCM -->|push notification| Mobile
+    GCS -->|POST /admin/followup| B_FOLLOW
     B_FOLLOW --> FS_S
     B_FOLLOW --> FCM
-    B_FOLLOW --> Telegram[Telegram Admin Channel]
+    B_FOLLOW --> Telegram
     B_HTTP --> B_CLINICAL
-    B_CLINICAL --> FS_CR
-    Backend --> SM
+    B_CLINICAL <--> FS_CR
     Backend --> FS_S
     Backend --> FS_N
-    Backend --> FS_PT
-    M_HEART -->|monitor Anak Unggul posts| Moltbook_API[Moltbook API]
+    M_HEART <-->|monitor posts| MoltAPI
     M_EXTRACT --> FS_CI
-    M_PERSONA -->|reply as persona| Moltbook_API
-    CB -->|push to dev → auto deploy| Backend
+    M_PERSONA -->|reply as persona| MoltAPI
+    A_AGENT --> A_T1
+    A_AGENT --> A_T2
+    A_AGENT --> A_T3
+    A_AGENT --> A_T4
+    A_T1 -->|jakarta curated| FS_CR
+    A_T1 -->|other cities live| SearchAPI
+    CB -->|dev branch auto deploy| Backend
+    CB -->|a2a branch auto deploy| A2AService
 ```
 
 ## Repository Structure
@@ -265,7 +296,8 @@ flowchart TD
 ```text
 NeuroDecode/
 |- README.md
-|- cloudbuild.yaml
+|- cloudbuild.yaml           ← main backend CI/CD
+|- cloudbuild_a2a.yaml       ← A2A agent CI/CD
 
 |- neurodecode_backend/
 |  |- README.md
@@ -281,11 +313,20 @@ NeuroDecode/
 |  |  |- gemini_live.py
 |  |  |- ai_processor.py
 |  |  |- clinical_store.py
+|  |  |- community_store.py
 |  |  |- push_sender.py
 |  |  |- push_device_store.py
 |  |  |- notification_store.py
 |  |  |- rule_debug_store.py
 |  |  |- models/
+|- neurodecode_a2a/           ← Phase 7 A2A Agent service
+|  |- agent.py               ← ADK Agent definition (4 tools)
+|  |- app.py                 ← FastAPI server + agent card
+|  |- middleware.py          ← ApiKeyMiddleware
+|  |- requirements.txt
+|  |- tools/
+|  |  |- clinical.py         ← find_asd_resources (Jakarta + global)
+|  |  |- asd_reasoning.py    ← suggest_interventions, de-escalation, risk
 |- neurodecode_mobile/
    |- README.md
    |- pubspec.yaml
@@ -350,22 +391,23 @@ Key HTTP endpoints:
 
 1. `GET /sessions`
 2. `GET /sessions/latest`
-3. `GET /profiles/{profile_id}`
-4. `PUT /profiles/{profile_id}`
-5. `GET /profiles/{profile_id}/memory`
-6. `POST /profiles/{profile_id}/memory`
-7. `GET /profiles/{profile_id}/memory-context`
-8. `POST /devices/push-token`
-9. `POST /devices/push-token/deactivate`
-10. `GET /notifications`
-11. `POST /notifications/{id}/read`
-12. `GET /clinical-resources` (optional: `?city=jakarta&resource_type=clinic&limit=50`)
-13. `GET /clinical-resources/{id}`
-14. `POST /admin/clinical-resources` (`X-Admin-Secret` required)
-15. `PATCH /admin/clinical-resources/{id}` (`X-Admin-Secret` required)
-16. `GET /admin/rules/debug` (admin token required)
-17. `GET /admin/push/devices` (admin token required)
-18. `POST /admin/push/test` (admin token required)
+3. `PATCH /sessions/{session_id}/rate` (query: `rating=1..5`) ← Phase 6
+4. `GET /profiles/{profile_id}`
+5. `PUT /profiles/{profile_id}`
+6. `GET /profiles/{profile_id}/memory`
+7. `POST /profiles/{profile_id}/memory`
+8. `GET /profiles/{profile_id}/memory-context`
+9. `POST /devices/push-token`
+10. `POST /devices/push-token/deactivate`
+11. `GET /notifications`
+12. `POST /notifications/{id}/read`
+13. `GET /clinical-resources` (optional: `?city=jakarta&resource_type=clinic&limit=50`)
+14. `GET /clinical-resources/{id}`
+15. `POST /admin/clinical-resources` (`X-Admin-Secret` required)
+16. `PATCH /admin/clinical-resources/{id}` (`X-Admin-Secret` required)
+17. `GET /admin/rules/debug` (admin token required)
+18. `GET /admin/push/devices` (admin token required)
+19. `POST /admin/push/test` (admin token required)
 
 WebSocket:
 
