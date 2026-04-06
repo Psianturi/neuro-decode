@@ -173,10 +173,10 @@ def _web_search_query(location: str, resource_type: str, limit: int) -> dict:
 
 
 def find_asd_resources(
-    location: str = "jakarta",
-    resource_type: str = "",
-    limit: int = 10,
-) -> dict:
+    location: str,
+    resource_type: str,
+    limit: str,
+):
     """
     Find ASD (autism) support resources in any city worldwide.
 
@@ -202,8 +202,8 @@ def find_asd_resources(
         Search), 'source': 'web_search', 'location', 'note'.
     """
     location = (location or "jakarta").strip()
-    rtype = resource_type.strip() if resource_type else ""
-    limit = max(1, min(int(limit), 20))
+    rtype = (resource_type or "").strip()
+    limit = max(1, min(int(limit or "10"), 20))
     key = _cache_key(location, rtype)
 
     if _is_curated(location):

@@ -38,9 +38,9 @@ def _gemini_call(prompt: str, max_tokens: int = 512) -> str:
 
 def suggest_interventions(
     trigger_type: str,
-    child_age: str = "unknown",
-    sensory_profile: str = "",
-) -> dict:
+    child_age: str,
+    sensory_profile: str,
+):
     """
     Suggest evidence-based interventions for a specific ASD trigger type.
 
@@ -57,6 +57,7 @@ def suggest_interventions(
         A dict with 'interventions' list and 'rationale'.
     """
     profile_note = f"\nKnown sensory profile: {sensory_profile}" if sensory_profile else ""
+    child_age = child_age or "unknown"
     prompt = (
         f"A caregiver needs intervention strategies for an autistic child (age: {child_age}).\n"
         f"Trigger: {trigger_type}{profile_note}\n\n"
@@ -69,8 +70,8 @@ def suggest_interventions(
 
 def get_de_escalation_steps(
     situation_description: str,
-    urgency_level: str = "medium",
-) -> dict:
+    urgency_level: str,
+):
     """
     Get step-by-step de-escalation protocol for an active distress situation.
 
@@ -86,7 +87,7 @@ def get_de_escalation_steps(
         A dict with 'steps' list, 'safety_note', and 'follow_up'.
     """
     prompt = (
-        f"URGENCY: {urgency_level.upper()}\n"
+        f"URGENCY: {(urgency_level or 'medium').upper()}\n"
         f"Situation: {situation_description}\n\n"
         "Provide an immediate de-escalation protocol for the caregiver. "
         "Format:\n"
@@ -104,9 +105,9 @@ def get_de_escalation_steps(
 
 def assess_escalation_risk(
     audio_pattern_description: str,
-    visual_pattern_description: str = "",
-    session_history_summary: str = "",
-) -> dict:
+    visual_pattern_description: str,
+    session_history_summary: str,
+):
     """
     Assess escalation risk based on behavioral pattern descriptions.
     Simulates the NeuroDecode observer model reasoning in natural language.
