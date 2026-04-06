@@ -8,8 +8,6 @@ Cost controls:
 - Firestore persistent cache — survives cold starts, shared across instances
 - Rate limit: max 15 web searches per location per hour
 """
-from __future__ import annotations
-
 import logging
 import os
 import time
@@ -22,21 +20,21 @@ _FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "gen-lang-client-0348071142"
 _VALID_TYPES = {"clinic", "therapist", "hospital", "community", "inclusive_school"}
 _CURATED_KEYWORDS = {"jakarta", "indonesia"}
 
-# In-memory cache: location_key → (result_dict, timestamp)
-_mem_cache: dict[str, tuple[dict, float]] = {}
+# In-memory cache: location_key -> (result_dict, timestamp)
+_mem_cache = {}  # type: dict
 _CACHE_TTL = 86400.0  # 24 hours
 
-# Rate limit: location_key → list of call timestamps in current window
-_rate_window: dict[str, list[float]] = {}
-_RATE_LIMIT = 15        # max web searches per location
-_RATE_WINDOW = 3600.0  # per hour
+# Rate limit: location_key -> list of call timestamps in current window
+_rate_window = {}  # type: dict
+_RATE_LIMIT = 15
+_RATE_WINDOW = 3600.0
 
 
-def _cache_key(location: str, resource_type: str) -> str:
+def _cache_key(location, resource_type):
     return f"{location.lower().strip()}:{resource_type or 'all'}"
 
 
-def _get_mem_cache(key: str) -> dict | None:
+def _get_mem_cache(key):
     if key in _mem_cache:
         result, ts = _mem_cache[key]
         if time.time() - ts < _CACHE_TTL:
@@ -45,26 +43,25 @@ def _get_mem_cache(key: str) -> dict | None:
     return None
 
 
-def _set_mem_cache(key: str, result: dict) -> None:
+def _set_mem_cache(key, result):
     _mem_cache[key] = (result, time.time())
 
 
-def _is_rate_limited(location_key: str) -> bool:
+def _is_rate_limited(location_key):
     now = time.time()
     calls = _rate_window.get(location_key, [])
-    # Drop calls outside the window
     calls = [t for t in calls if now - t < _RATE_WINDOW]
     _rate_window[location_key] = calls
     return len(calls) >= _RATE_LIMIT
 
 
-def _record_call(location_key: str) -> None:
+def _record_call(location_key):
     calls = _rate_window.get(location_key, [])
     calls.append(time.time())
     _rate_window[location_key] = calls
 
 
-def _get_firestore_cache(key: str) -> dict | None:
+def _get_firestore_cache(key):
     """Check Firestore persistent cache — survives cold starts."""
     try:
         from google.cloud import firestore
@@ -81,7 +78,7 @@ def _get_firestore_cache(key: str) -> dict | None:
     return None
 
 
-def _set_firestore_cache(key: str, result: dict) -> None:
+def _set_firestore_cache(key, result):
     """Persist result to Firestore cache. Best-effort, non-blocking."""
     try:
         from google.cloud import firestore
@@ -95,23 +92,21 @@ def _set_firestore_cache(key: str, result: dict) -> None:
         logger.debug("[find_asd_resources] Firestore cache write failed: %s", exc)
 
 
-def _is_curated(location: str) -> bool:
+def _is_curated(location):
     loc = location.strip().lower()
     return any(kw in loc for kw in _CURATED_KEYWORDS)
 
 
-def _firestore_query(resource_type: str, limit: int, location: str) -> dict:
+def _firestore_query(resource_type, limit, location):
     try:
         from google.cloud import firestore
         from google.cloud.firestore_v1.base_query import FieldFilter
-
         client = firestore.Client(project=_FIRESTORE_PROJECT)
         ref = client.collection(_COLLECTION)
         ref = ref.where(filter=FieldFilter("is_active", "==", True))
         ref = ref.where(filter=FieldFilter("city", "==", "jakarta"))
         if resource_type and resource_type.lower() in _VALID_TYPES:
             ref = ref.where(filter=FieldFilter("resource_type", "==", resource_type.lower()))
-
         docs = ref.limit(limit).stream()
         results = []
         for doc in docs:
@@ -124,22 +119,16 @@ def _firestore_query(resource_type: str, limit: int, location: str) -> dict:
                 "services": d.get("services", [])[:3],
                 "instagram": d.get("instagram", ""),
             })
-        return {
-            "resources": results,
-            "total": len(results),
-            "source": "curated",
-            "location": location,
-        }
+        return {"resources": results, "total": len(results), "source": "curated", "location": location}
     except Exception as exc:
         logger.warning("[find_asd_resources] Firestore query failed: %s", exc)
         return {"resources": [], "total": 0, "source": "curated", "error": str(exc), "location": location}
 
 
-def _web_search_query(location: str, resource_type: str, limit: int) -> dict:
+def _web_search_query(location, resource_type, limit):
     try:
         from google import genai
         from google.genai import types as genai_types
-
         type_filter = f" {resource_type}" if resource_type else ""
         prompt = (
             f"List {limit} ASD (autism spectrum disorder) support resources"
@@ -160,11 +149,8 @@ def _web_search_query(location: str, resource_type: str, limit: int) -> dict:
         )
         text = (response.text or "").strip()
         return {
-            "resources": [],
-            "summary": text,
-            "total": 0,
-            "source": "web_search",
-            "location": location,
+            "resources": [], "summary": text, "total": 0,
+            "source": "web_search", "location": location,
             "note": "Results sourced from Google Search via Gemini. Verify contact details before use.",
         }
     except Exception as exc:

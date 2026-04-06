@@ -1,7 +1,5 @@
 """Tools: ASD reasoning via Gemini — suggest_interventions, get_de_escalation_steps,
 assess_escalation_risk. All inputs are synthetic/descriptive text — no PHI."""
-from __future__ import annotations
-
 import logging
 import os
 
@@ -16,7 +14,7 @@ _ASD_SYSTEM = (
 )
 
 
-def _gemini_call(prompt: str, max_tokens: int = 512) -> str:
+def _gemini_call(prompt, max_tokens=512):
     try:
         from google import genai
         from google.genai import types as genai_types
