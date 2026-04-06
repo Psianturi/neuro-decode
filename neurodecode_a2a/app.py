@@ -186,12 +186,19 @@ async def a2a_endpoint(request: dict) -> dict:
             session_id=session.id,
             new_message=content,
         ):
-            # ADK 0.4.0: collect text from all events that have content
-            # is_final_response() may not work reliably — collect all text parts
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text:
-                        response_text = part.text  # keep last non-empty text
+            # Diagnostic logging — understand ADK 0.4.0 event structure
+            is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
+            has_content = bool(event.content and event.content.parts) if hasattr(event, "content") else False
+            author = getattr(event, "author", "?")
+            logger.info("[a2a][event] author=%s final=%s has_content=%s", author, is_final, has_content)
+            if has_content:
+                for i, part in enumerate(event.content.parts):
+                    txt = getattr(part, "text", None)
+                    logger.info("[a2a][event] part[%d] type=%s text_len=%s preview=%s",
+                                i, type(part).__name__, len(txt) if txt else 0,
+                                repr(txt[:120] if txt else None))
+                    if txt:
+                        response_text = txt  # keep last non-empty text
 
         return {
             "jsonrpc": "2.0",
