@@ -38,7 +38,7 @@ def suggest_interventions(
     trigger_type: str,
     child_age: str,
     sensory_profile: str,
-):
+) -> str:
     """
     Suggest evidence-based interventions for a specific ASD trigger type.
 
@@ -68,7 +68,7 @@ def suggest_interventions(
 def get_de_escalation_steps(
     situation_description: str,
     urgency_level: str,
-):
+) -> str:
     """
     Get step-by-step de-escalation protocol for an active distress situation.
 
@@ -100,7 +100,7 @@ def assess_escalation_risk(
     audio_pattern_description: str,
     visual_pattern_description: str,
     session_history_summary: str,
-):
+) -> str:
     """
     Assess escalation risk based on behavioral pattern descriptions.
     Simulates the NeuroDecode observer model reasoning in natural language.

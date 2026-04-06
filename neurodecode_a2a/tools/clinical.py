@@ -163,7 +163,7 @@ def find_asd_resources(
     location: str,
     resource_type: str,
     limit: str,
-):
+) -> str:
     """
     Find ASD (autism) support resources in any city worldwide.
 
