@@ -1,6 +1,4 @@
 """NeuroDecode A2A Agent — ADK agent definition."""
-from __future__ import annotations
-
 import os
 
 from google.adk.agents import Agent
@@ -33,7 +31,7 @@ _AGENT_INSTRUCTION = (
 
 root_agent = Agent(
     name="neurodecode_asd_agent",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001"),
     description=(
         "ASD caregiver support agent — finds ASD resources worldwide (curated "
         "database for Jakarta, live Google Search for all other cities), "

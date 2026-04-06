@@ -20,7 +20,7 @@ def _gemini_call(prompt, max_tokens=512):
         from google.genai import types as genai_types
         client = genai.Client()
         response = client.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001"),
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=_ASD_SYSTEM,

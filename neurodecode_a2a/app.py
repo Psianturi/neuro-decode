@@ -4,8 +4,6 @@ Agent card (public):  GET  /.well-known/agent-card.json
 Health check:         GET  /health
 A2A endpoint (auth):  POST /   (requires X-API-Key header, enforced by middleware)
 """
-from __future__ import annotations
-
 import logging
 import os
 
