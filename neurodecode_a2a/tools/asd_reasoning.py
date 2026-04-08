@@ -2,6 +2,7 @@
 assess_escalation_risk. All inputs are synthetic/descriptive text — no PHI."""
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -13,25 +14,37 @@ _ASD_SYSTEM = (
     "If the caregiver's language context is Indonesian, respond in Indonesian."
 )
 
+_RETRYABLE = ("503", "429", "resource exhausted", "overloaded", "unavailable")
+
 
 def _gemini_call(prompt, max_tokens=512):
-    try:
-        from google import genai
-        from google.genai import types as genai_types
-        client = genai.Client()
-        response = client.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001"),
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=_ASD_SYSTEM,
-                temperature=0.3,
-                max_output_tokens=max_tokens,
-            ),
-        )
-        return (response.text or "").strip()
-    except Exception as exc:
-        logger.warning("[asd_reasoning] Gemini call failed: %s", exc)
-        return f"Unable to generate response: {exc}"
+    from google import genai
+    from google.genai import types as genai_types
+    client = genai.Client()
+    last_exc = None
+    for attempt in range(3):  # up to 3 attempts: 0s, 2s, 4s backoff
+        try:
+            response = client.models.generate_content(
+                model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001"),
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=_ASD_SYSTEM,
+                    temperature=0.3,
+                    max_output_tokens=max_tokens,
+                ),
+            )
+            return (response.text or "").strip()
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc).lower()
+            if any(code in msg for code in _RETRYABLE) and attempt < 2:
+                wait = 2 * (attempt + 1)
+                logger.warning("[asd_reasoning] Gemini %s on attempt %d, retry in %ds", exc, attempt + 1, wait)
+                time.sleep(wait)
+            else:
+                break
+    logger.warning("[asd_reasoning] Gemini call failed after retries: %s", last_exc)
+    return f"Unable to generate response: {last_exc}"
 
 
 def suggest_interventions(
