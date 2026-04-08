@@ -27,7 +27,7 @@ _CACHE_TTL = 86400.0  # 24 hours
 
 # Rate limit: location_key -> list of call timestamps in current window
 _rate_window = {}  # type: dict
-_RATE_LIMIT = 15
+_RATE_LIMIT = 20
 _RATE_WINDOW = 3600.0
 
 
@@ -160,9 +160,9 @@ def _web_search_query(location, resource_type, limit):
 
 
 def find_asd_resources(
-    location: str,
-    resource_type: str,
-    limit: str,
+    location: str = "jakarta",
+    resource_type: str = "",
+    limit: int = 10,
 ) -> str:
     """
     Find ASD (autism) support resources in any city worldwide.
@@ -190,7 +190,7 @@ def find_asd_resources(
     """
     location = (location or "jakarta").strip()
     rtype = (resource_type or "").strip()
-    limit = max(1, min(int(limit or "10"), 20))
+    limit = max(1, min(int(limit), 20))
     key = _cache_key(location, rtype)
 
     if _is_curated(location):
