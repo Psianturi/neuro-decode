@@ -212,11 +212,49 @@ async def a2a_endpoint(request: dict) -> dict:
                 logger.info("[a2a][event] author=%s final=%s err=%s content=None",
                             author, is_final, error_code)
 
-        # Fallback: if model stopped without generating text, return raw tool data
+        # Fallback: if model stopped without generating text, synthesize a readable reply
         if not response_text and last_fn_resp_data is not None:
             import json as _json
-            response_text = _json.dumps(last_fn_resp_data, ensure_ascii=False, default=str)
-            logger.warning("[a2a] No text response from model — returning raw tool data as fallback")
+
+            normalized = last_fn_resp_data
+            if isinstance(last_fn_resp_data, dict) and isinstance(last_fn_resp_data.get("result"), str):
+                try:
+                    normalized = _json.loads(last_fn_resp_data["result"])
+                except Exception:
+                    normalized = {"result": last_fn_resp_data["result"]}
+
+            if isinstance(normalized, dict):
+                summary = str(normalized.get("summary") or "").strip()
+                resources = normalized.get("resources")
+                source = normalized.get("source")
+
+                if summary:
+                    response_text = summary
+                elif isinstance(resources, list) and resources:
+                    lines = ["Here are some ASD resources I found:"]
+                    for idx, item in enumerate(resources[:5], 1):
+                        if not isinstance(item, dict):
+                            continue
+                        name = item.get("name") or "Unknown"
+                        rtype = item.get("resource_type") or "resource"
+                        addr = item.get("address") or "Address not available"
+                        contact = item.get("contact") or "Contact not available"
+                        lines.append(f"{idx}. {name} ({rtype})")
+                        lines.append(f"   Address: {addr}")
+                        lines.append(f"   Contact: {contact}")
+                    response_text = "\n".join(lines)
+                elif source == "web_search":
+                    response_text = (
+                        "I could not retrieve grounded web results for that location right now. "
+                        "Please try a more specific request, for example: "
+                        "'Find ASD therapists in Singapore, limit 5'."
+                    )
+                else:
+                    response_text = _json.dumps(normalized, ensure_ascii=False, default=str)
+            else:
+                response_text = _json.dumps(last_fn_resp_data, ensure_ascii=False, default=str)
+
+            logger.warning("[a2a] No text response from model — using synthesized fallback")
 
         return {
             "jsonrpc": "2.0",
