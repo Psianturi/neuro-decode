@@ -6,18 +6,19 @@ import 'clinical_resource.dart';
 
 class ClinicalService {
   Future<List<ClinicalResource>> fetchResources({
-    String city = 'jakarta',
+    String? city,
     String? resourceType,
     int limit = 100,
   }) async {
     final queryParams = <String, String>{
-      'city': city,
       'active_only': 'true',
       'limit': limit.toString(),
+      if (city != null && city.trim().isNotEmpty) 'city': city,
       if (resourceType != null) 'resource_type': resourceType,
     };
 
-    final uri = Uri.https(AppConfig.backendUrl, '/clinical-resources', queryParams);
+    final uri =
+        Uri.https(AppConfig.backendUrl, '/clinical-resources', queryParams);
 
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 10);
