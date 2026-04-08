@@ -31,7 +31,7 @@ _AGENT_INSTRUCTION = (
 
 root_agent = Agent(
     name="neurodecode_asd_agent",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001"),
+    model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
     description=(
         "ASD caregiver support agent — finds ASD resources worldwide (curated "
         "database for Jakarta, live Google Search for all other cities), "

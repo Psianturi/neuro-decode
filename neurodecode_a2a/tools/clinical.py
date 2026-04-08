@@ -141,7 +141,7 @@ def _web_search_query(location, resource_type, limit):
         )
         client = genai.Client()
         response = client.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
