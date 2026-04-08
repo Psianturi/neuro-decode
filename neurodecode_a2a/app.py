@@ -181,7 +181,7 @@ async def a2a_endpoint(request: dict) -> dict:
         )
 
         response_text = ""
-        all_events = []
+        last_fn_resp_data = None
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session.id,
@@ -205,10 +205,18 @@ async def a2a_endpoint(request: dict) -> dict:
                         list(fn_resp.response.keys()) if fn_resp and hasattr(fn_resp, "response") else None,
                     )
                     if txt:
-                        response_text = txt.decode("utf-8") if isinstance(txt, bytes) else str(txt)
+                        response_text += (txt.decode("utf-8") if isinstance(txt, bytes) else str(txt))
+                    if fn_resp and hasattr(fn_resp, "response"):
+                        last_fn_resp_data = fn_resp.response
             else:
                 logger.info("[a2a][event] author=%s final=%s err=%s content=None",
                             author, is_final, error_code)
+
+        # Fallback: if model stopped without generating text, return raw tool data
+        if not response_text and last_fn_resp_data is not None:
+            import json as _json
+            response_text = _json.dumps(last_fn_resp_data, ensure_ascii=False, default=str)
+            logger.warning("[a2a] No text response from model — returning raw tool data as fallback")
 
         return {
             "jsonrpc": "2.0",
