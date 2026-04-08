@@ -34,6 +34,8 @@ steps:
       - '512Mi'
       - '--update-secrets'
       - 'GOOGLE_API_KEY=neurodecode-gemini-api-key:latest,A2A_API_KEY=neurodecode-a2a-api-key:latest'
+      - '--remove-secrets'
+      - 'GEMINI_API_KEY'
       - '--set-env-vars'
       - 'FIRESTORE_PROJECT=gen-lang-client-0348071142,GEMINI_MODEL=gemini-2.5-flash-lite,GOOGLE_GENAI_USE_VERTEXAI=FALSE,A2A_SERVICE_URL=https://neurodecode-a2a-jzfv6ygw3q-as.a.run.app'
 

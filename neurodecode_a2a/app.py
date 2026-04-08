@@ -26,6 +26,17 @@ def _is_retryable_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(marker in msg for marker in _RETRYABLE_MARKERS)
 
+
+def _preferred_language_hint(text: str) -> str:
+    lower = f" {text.lower()} "
+    id_markers = (
+        " saya ", " anak ", " tidak ", " nggak ", " ga ", " bagaimana ",
+        " tolong ", " dengan ", " dan ", " kalau ", " mau ", " bisa "
+    )
+    if any(marker in lower for marker in id_markers):
+        return "Indonesian"
+    return "English"
+
 app = FastAPI(title="NeuroDecode A2A Agent")
 app.add_middleware(ApiKeyMiddleware)
 
@@ -173,8 +184,14 @@ async def a2a_endpoint(request: dict) -> dict:
                 "error": {"code": -32600, "message": "No text content in request"},
             }
 
-        session_id = params.get("sessionId", "default")
-        user_id = params.get("userId", "a2a-user")
+        request_id = str(request.get("id") or "")
+        session_id = (
+            params.get("contextId")
+            or params.get("sessionId")
+            or request_id
+            or "default"
+        )
+        user_id = params.get("userId") or f"a2a-{session_id}"
 
         # create_session is synchronous in google-adk 0.4.0
         session = session_service.create_session(
@@ -183,9 +200,15 @@ async def a2a_endpoint(request: dict) -> dict:
             session_id=session_id,
         )
 
+        language_hint = _preferred_language_hint(message_text)
+        wrapped_text = (
+            f"Reply in {language_hint} only, based on the latest user message below.\n"
+            f"User message: {message_text}"
+        )
+
         content = genai_types.Content(
             role="user",
-            parts=[genai_types.Part(text=message_text)],
+            parts=[genai_types.Part(text=wrapped_text)],
         )
 
         response_text = ""

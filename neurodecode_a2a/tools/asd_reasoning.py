@@ -49,8 +49,8 @@ def _gemini_call(prompt, max_tokens=512):
 
 def suggest_interventions(
     trigger_type: str,
-    child_age: str,
-    sensory_profile: str,
+    child_age: str = "unknown",
+    sensory_profile: str = "",
 ) -> str:
     """
     Suggest evidence-based interventions for a specific ASD trigger type.
@@ -80,7 +80,7 @@ def suggest_interventions(
 
 def get_de_escalation_steps(
     situation_description: str,
-    urgency_level: str,
+    urgency_level: str = "medium",
 ) -> str:
     """
     Get step-by-step de-escalation protocol for an active distress situation.
@@ -111,8 +111,8 @@ def get_de_escalation_steps(
 
 def assess_escalation_risk(
     audio_pattern_description: str,
-    visual_pattern_description: str,
-    session_history_summary: str,
+    visual_pattern_description: str = "",
+    session_history_summary: str = "",
 ) -> str:
     """
     Assess escalation risk based on behavioral pattern descriptions.
