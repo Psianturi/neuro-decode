@@ -19,6 +19,21 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
   bool _isLoading = false;
   String? _errorMessage;
   String? _selectedType; // null = All
+  String? _selectedCity = 'jakarta';
+
+  static const _cities = [
+    (label: 'All Cities', value: null),
+    (label: 'Jakarta', value: 'jakarta'),
+    (label: 'Bandung', value: 'bandung'),
+    (label: 'Surabaya', value: 'surabaya'),
+    (label: 'Medan', value: 'medan'),
+    (label: 'Yogyakarta', value: 'yogyakarta'),
+    (label: 'Makassar', value: 'makassar'),
+    (label: 'Bangkok', value: 'bangkok'),
+    (label: 'Singapore', value: 'singapore'),
+    (label: 'Kuala Lumpur', value: 'kuala lumpur'),
+    (label: 'New York', value: 'new york'),
+  ];
 
   static const _types = [
     (label: 'All', value: null),
@@ -42,7 +57,10 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
       _errorMessage = null;
     });
     try {
-      final results = await _service.fetchResources(limit: 100);
+      final results = await _service.fetchResources(
+        city: _selectedCity,
+        limit: 100,
+      );
       if (!mounted) return;
       setState(() {
         _all = results;
@@ -63,9 +81,7 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
 
   List<ClinicalResource> get _filtered {
     if (_selectedType == null) return _all;
-    return _all
-        .where((r) => r.resourceType == _selectedType)
-        .toList();
+    return _all.where((r) => r.resourceType == _selectedType).toList();
   }
 
   @override
@@ -90,6 +106,15 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _CitySelectorRow(
+            cities: _cities,
+            selected: _selectedCity,
+            onSelected: (city) {
+              if (_selectedCity == city) return;
+              setState(() => _selectedCity = city);
+              _load();
+            },
+          ),
           _FilterChipsRow(
             types: _types,
             selected: _selectedType,
@@ -115,7 +140,10 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
             children: [
               Icon(Icons.wifi_off_rounded,
                   size: 48,
-                  color: Theme.of(context).colorScheme.error.withValues(alpha: 0.6)),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .error
+                      .withValues(alpha: 0.6)),
               const SizedBox(height: NeuroColors.spacingMd),
               Text(
                 _errorMessage!,
@@ -139,7 +167,9 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
     if (items.isEmpty) {
       return Center(
         child: Text(
-          'No resources found for this filter.',
+          _selectedCity == null
+              ? 'No resources found for this filter.'
+              : 'No resources found in ${_selectedCity![0].toUpperCase()}${_selectedCity!.substring(1)} for this filter.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
       );
@@ -168,6 +198,61 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 typedef _TypeOption = ({String label, String? value});
+typedef _CityOption = ({String label, String? value});
+
+class _CitySelectorRow extends StatelessWidget {
+  const _CitySelectorRow({
+    required this.cities,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<_CityOption> cities;
+  final String? selected;
+  final void Function(String?) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        NeuroColors.spacingMd,
+        NeuroColors.spacingSm,
+        NeuroColors.spacingMd,
+        0,
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.location_on_outlined,
+            size: 18,
+            color:
+                Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+          ),
+          const SizedBox(width: NeuroColors.spacingXs),
+          const Text('City:'),
+          const SizedBox(width: NeuroColors.spacingXs),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String?>(
+                value: selected,
+                isExpanded: true,
+                items: cities
+                    .map(
+                      (c) => DropdownMenuItem<String?>(
+                        value: c.value,
+                        child: Text(c.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: onSelected,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _FilterChipsRow extends StatelessWidget {
   const _FilterChipsRow({
@@ -295,7 +380,10 @@ class _ResourceCard extends StatelessWidget {
               children: [
                 Icon(Icons.location_on_outlined,
                     size: 15,
-                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.5)),
                 const SizedBox(width: NeuroColors.spacingXs),
                 Expanded(
                   child: Text(
@@ -313,8 +401,7 @@ class _ResourceCard extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(Icons.phone_outlined,
-                      size: 15,
-                      color: Theme.of(context).colorScheme.primary),
+                      size: 15, color: Theme.of(context).colorScheme.primary),
                   const SizedBox(width: NeuroColors.spacingXs),
                   Text(
                     resource.contact!,
@@ -334,8 +421,7 @@ class _ResourceCard extends StatelessWidget {
               ),
             ),
           ],
-          if (resource.instagram != null &&
-              resource.instagram!.isNotEmpty) ...[
+          if (resource.instagram != null && resource.instagram!.isNotEmpty) ...[
             const SizedBox(height: NeuroColors.spacingXs),
             Row(
               children: [
@@ -426,8 +512,7 @@ class _ServiceTags extends StatelessWidget {
                   .colorScheme
                   .surfaceContainerHighest
                   .withValues(alpha: 0.6),
-              borderRadius:
-                  BorderRadius.circular(NeuroColors.radiusPill),
+              borderRadius: BorderRadius.circular(NeuroColors.radiusPill),
             ),
             child: Text(
               s,
@@ -446,8 +531,7 @@ class _ServiceTags extends StatelessWidget {
                   .colorScheme
                   .surfaceContainerHighest
                   .withValues(alpha: 0.4),
-              borderRadius:
-                  BorderRadius.circular(NeuroColors.radiusPill),
+              borderRadius: BorderRadius.circular(NeuroColors.radiusPill),
             ),
             child: Text(
               '+$overflow more',
