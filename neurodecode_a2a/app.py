@@ -260,9 +260,12 @@ async def a2a_endpoint(request: dict) -> dict:
             "jsonrpc": "2.0",
             "id": request.get("id"),
             "result": {
+                "kind": "task",
                 "id": request.get("id", "task-1"),
+                "contextId": session_id,
                 "status": {"state": "completed"},
                 "artifacts": [{
+                    "artifactId": "response-1",
                     "parts": [{"kind": "text", "text": response_text}]
                 }],
             },
