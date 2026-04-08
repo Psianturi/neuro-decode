@@ -97,6 +97,24 @@ _CITY_PRESETS = {
         "old_location": "-6.9175,107.6191",
         "old_radius": 22000,
     },
+    "yogyakarta": {
+        "region": "ID",
+        "language": "id",
+        "old_location": "-7.7956,110.3695",
+        "old_radius": 22000,
+    },
+    "makassar": {
+        "region": "ID",
+        "language": "id",
+        "old_location": "-5.1477,119.4327",
+        "old_radius": 28000,
+    },
+    "bangkok": {
+        "region": "TH",
+        "language": "en",
+        "old_location": "13.7563,100.5018",
+        "old_radius": 30000,
+    },
     "new york": {
         "region": "US",
         "language": "en",
