@@ -5,6 +5,8 @@ Based on: https://developers.google.com/maps/documentation/places/web-service/te
 
 Usage:
     c:/PROJ/NeuroDecode/.venv/Scripts/python.exe neurodecode_backend/scripts/harvest_clinical_places.py
+    c:/PROJ/NeuroDecode/.venv/Scripts/python.exe neurodecode_backend/scripts/harvest_clinical_places.py --cities "jakarta,medan,surabaya"
+    c:/PROJ/NeuroDecode/.venv/Scripts/python.exe neurodecode_backend/scripts/harvest_clinical_places.py --cities "new york,singapore" --country ""
 
 Requires:
     neurodecode_backend/.env  with PLACES_API_KEY_NEW (primary)
@@ -15,6 +17,7 @@ Requires:
 """
 
 import asyncio
+import argparse
 import logging
 import os
 import sys
@@ -44,13 +47,68 @@ _KEY_OLD = os.getenv("PLACES_API_KEY", "")
 _PLACES_NEW_URL = "https://places.googleapis.com/v1/places:searchText"
 _PLACES_OLD_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
-# Jakarta bounding box — used as locationRestriction (hard boundary)
-# Results MUST be within this rectangle (stricter than locationBias)
-_JAKARTA_RESTRICTION = {
-    "rectangle": {
-        "low":  {"latitude": -6.37, "longitude": 106.68},
-        "high": {"latitude": -6.08, "longitude": 106.97},
-    }
+# Known city config for stronger geo precision and old API fallback.
+_CITY_PRESETS = {
+    "jakarta": {
+        "region": "ID",
+        "language": "id",
+        "location_restriction": {
+            "rectangle": {
+                "low": {"latitude": -6.37, "longitude": 106.68},
+                "high": {"latitude": -6.08, "longitude": 106.97},
+            }
+        },
+        "old_location": "-6.2,106.82",
+        "old_radius": 35000,
+    },
+    "medan": {
+        "region": "ID",
+        "language": "id",
+        "location_restriction": {
+            "rectangle": {
+                "low": {"latitude": 3.45, "longitude": 98.55},
+                "high": {"latitude": 3.75, "longitude": 98.80},
+            }
+        },
+        "old_location": "3.5952,98.6722",
+        "old_radius": 25000,
+    },
+    "surabaya": {
+        "region": "ID",
+        "language": "id",
+        "location_restriction": {
+            "rectangle": {
+                "low": {"latitude": -7.40, "longitude": 112.58},
+                "high": {"latitude": -7.17, "longitude": 112.88},
+            }
+        },
+        "old_location": "-7.2575,112.7521",
+        "old_radius": 25000,
+    },
+    "bandung": {
+        "region": "ID",
+        "language": "id",
+        "location_restriction": {
+            "rectangle": {
+                "low": {"latitude": -6.99, "longitude": 107.49},
+                "high": {"latitude": -6.80, "longitude": 107.75},
+            }
+        },
+        "old_location": "-6.9175,107.6191",
+        "old_radius": 22000,
+    },
+    "new york": {
+        "region": "US",
+        "language": "en",
+    },
+    "singapore": {
+        "region": "SG",
+        "language": "en",
+    },
+    "kuala lumpur": {
+        "region": "MY",
+        "language": "en",
+    },
 }
 
 # FieldMask — comma-separated, NO spaces allowed per docs
@@ -65,19 +123,85 @@ _FIELD_MASK = ",".join([
     "nextPageToken",
 ])
 
-# ── search queries (Indonesian + English for better coverage) ────────────────
-_QUERIES = [
-    "klinik terapi autisme Jakarta",
-    "terapis ASD anak Jakarta",
-    "sekolah inklusi autisme Jakarta",
-    "speech therapy anak Jakarta",
-    "occupational therapy anak Jakarta",
-    "psikolog anak autisme Jakarta",
-    "pusat terapi anak berkebutuhan khusus Jakarta",
-    "homeschooling autisme Jakarta",
-    "klinik tumbuh kembang anak Jakarta",
-    "autism center Jakarta",
+# ── search query templates (expanded per city) ──────────────────────────────
+_QUERY_TEMPLATES_ID = [
+    "klinik terapi autisme {city}",
+    "terapis ASD anak {city}",
+    "sekolah inklusi autisme {city}",
+    "speech therapy anak {city}",
+    "occupational therapy anak {city}",
+    "psikolog anak autisme {city}",
+    "pusat terapi anak berkebutuhan khusus {city}",
+    "homeschooling autisme {city}",
+    "klinik tumbuh kembang anak {city}",
+    "autism center {city}",
 ]
+
+_QUERY_TEMPLATES_GLOBAL = [
+    "autism clinic {city}",
+    "ASD therapist {city}",
+    "autism center {city}",
+    "speech therapy autism {city}",
+    "occupational therapy autism {city}",
+    "child psychologist autism {city}",
+    "special education autism {city}",
+]
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Harvest ASD clinical resources into Firestore")
+    parser.add_argument(
+        "--cities",
+        default="jakarta",
+        help="Comma-separated cities, e.g. 'jakarta,medan,surabaya'",
+    )
+    parser.add_argument(
+        "--country",
+        default="",
+        help="Optional country suffix for queries, e.g. 'Indonesia' or 'United States'",
+    )
+    parser.add_argument(
+        "--max-queries-per-city",
+        type=int,
+        default=0,
+        help="Optional cap for query count per city (0 = all templates)",
+    )
+    return parser.parse_args()
+
+
+def _parse_cities(raw: str) -> list[str]:
+    out: list[str] = []
+    seen = set()
+    for part in (raw or "jakarta").split(","):
+        city = part.strip()
+        if not city:
+            continue
+        key = city.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(city)
+    return out or ["jakarta"]
+
+
+def _city_profile(city: str) -> dict:
+    key = city.lower().strip()
+    base = _CITY_PRESETS.get(key, {})
+    if base:
+        return dict(base)
+    return {
+        "region": "",
+        "language": "en",
+    }
+
+
+def _queries_for_city(city: str, country: str, region: str, max_queries: int) -> list[str]:
+    city_phrase = city if not country else f"{city}, {country}"
+    templates = _QUERY_TEMPLATES_ID if region == "ID" else _QUERY_TEMPLATES_GLOBAL
+    queries = [tpl.format(city=city_phrase) for tpl in templates]
+    if max_queries > 0:
+        return queries[:max_queries]
+    return queries
 
 # ── resource type inference from Google place types ──────────────────────────
 _SCHOOL_TYPES = {"school", "primary_school", "secondary_school", "preschool", "university"}
@@ -103,6 +227,9 @@ def _today() -> str:
 async def _fetch_page_new(
     client: httpx.AsyncClient,
     query: str,
+    location_restriction: dict | None,
+    language_code: str,
+    region_code: str,
     page_token: str | None = None,
 ) -> tuple[list[dict], str | None]:
     """Fetch one page from Places API (New) Text Search.
@@ -112,10 +239,12 @@ async def _fetch_page_new(
     body: dict = {
         "textQuery": query,
         "pageSize": 20,                           # max per page per docs
-        "languageCode": "id",                      # Indonesian preferred
-        "regionCode": "ID",
-        "locationRestriction": _JAKARTA_RESTRICTION,  # hard boundary = Jakarta only
+        "languageCode": language_code or "en",
     }
+    if region_code:
+        body["regionCode"] = region_code
+    if location_restriction:
+        body["locationRestriction"] = location_restriction
     if page_token:
         body["pageToken"] = page_token
 
@@ -138,7 +267,13 @@ async def _fetch_page_new(
     return places, next_token
 
 
-async def _search_new_all_pages(client: httpx.AsyncClient, query: str) -> list[dict]:
+async def _search_new_all_pages(
+    client: httpx.AsyncClient,
+    query: str,
+    location_restriction: dict | None,
+    language_code: str,
+    region_code: str,
+) -> list[dict]:
     """Fetch all pages (up to 60 results max per docs) for a query."""
     all_places: list[dict] = []
     page_token: str | None = None
@@ -146,7 +281,14 @@ async def _search_new_all_pages(client: httpx.AsyncClient, query: str) -> list[d
 
     while True:
         page_num += 1
-        places, next_token = await _fetch_page_new(client, query, page_token)
+        places, next_token = await _fetch_page_new(
+            client,
+            query,
+            location_restriction,
+            language_code,
+            region_code,
+            page_token,
+        )
         all_places.extend(places)
         log.info("    page %d: %d results (total so far: %d)", page_num, len(places), len(all_places))
 
@@ -160,15 +302,22 @@ async def _search_new_all_pages(client: httpx.AsyncClient, query: str) -> list[d
 
 
 # ── Places API (old) — fallback, single page only ───────────────────────────
-async def _search_old(client: httpx.AsyncClient, query: str) -> list[dict]:
+async def _search_old(
+    client: httpx.AsyncClient,
+    query: str,
+    old_location: str | None,
+    old_radius: int,
+    language_code: str,
+) -> list[dict]:
     """Call Places API (old) Text Search. Returns raw results list."""
     params = {
         "query": query,
         "key": _KEY_OLD,
-        "location": "-6.2,106.82",
-        "radius": 35000,
-        "language": "id",
+        "language": language_code or "en",
     }
+    if old_location:
+        params["location"] = old_location
+        params["radius"] = old_radius
     resp = await client.get(_PLACES_OLD_URL, params=params, timeout=20)
     if resp.status_code != 200:
         log.warning("Places API (old) HTTP %s for '%s'", resp.status_code, query)
@@ -182,7 +331,7 @@ async def _search_old(client: httpx.AsyncClient, query: str) -> list[dict]:
 
 
 # ── normalize to our schema ──────────────────────────────────────────────────
-def _normalize_new(place: dict) -> tuple[str, dict] | None:
+def _normalize_new(place: dict, city: str) -> tuple[str, dict] | None:
     """Map Places API (New) response → (place_id, payload). Returns None if invalid."""
     place_id = place.get("id", "").strip()
     if not place_id:
@@ -199,7 +348,7 @@ def _normalize_new(place: dict) -> tuple[str, dict] | None:
     payload = {
         "name": name,
         "resource_type": _infer_resource_type(google_types),
-        "city": "jakarta",
+        "city": city.lower().strip(),
         "address": address,
         "contact": phone,
         "instagram": "",
@@ -212,7 +361,7 @@ def _normalize_new(place: dict) -> tuple[str, dict] | None:
     return place_id, payload
 
 
-def _normalize_old(place: dict) -> tuple[str, dict] | None:
+def _normalize_old(place: dict, city: str) -> tuple[str, dict] | None:
     """Map Places API (old) response → (place_id, payload). Returns None if invalid."""
     place_id = place.get("place_id", "").strip()
     name = place.get("name", "").strip()
@@ -225,7 +374,7 @@ def _normalize_old(place: dict) -> tuple[str, dict] | None:
     payload = {
         "name": name,
         "resource_type": _infer_resource_type(google_types),
-        "city": "jakarta",
+        "city": city.lower().strip(),
         "address": address,
         "contact": "",
         "instagram": "",
@@ -240,6 +389,9 @@ def _normalize_old(place: dict) -> tuple[str, dict] | None:
 
 # ── main ─────────────────────────────────────────────────────────────────────
 async def main() -> None:
+    args = _parse_args()
+    cities = _parse_cities(args.cities)
+
     if not _KEY_NEW and not _KEY_OLD:
         log.error("No API keys found. Set PLACES_API_KEY_NEW or PLACES_API_KEY in .env")
         sys.exit(1)
@@ -257,43 +409,61 @@ async def main() -> None:
     skipped = 0
 
     async with httpx.AsyncClient() as client:
-        for query in _QUERIES:
-            log.info("Searching: '%s'", query)
-            normalized: list[tuple[str, dict]] = []
+        for city in cities:
+            profile = _city_profile(city)
+            region = profile.get("region", "")
+            language = profile.get("language", "en")
+            location_restriction = profile.get("location_restriction")
+            old_location = profile.get("old_location")
+            old_radius = int(profile.get("old_radius", 35000))
+            queries = _queries_for_city(city, args.country, region, args.max_queries_per_city)
 
-            # Primary: Places API (New) with full pagination
-            if _KEY_NEW:
-                raw_places = await _search_new_all_pages(client, query)
-                for p in raw_places:
-                    result = _normalize_new(p)
-                    if result:
-                        normalized.append(result)
-                log.info("  → %d valid results (Places New)", len(normalized))
+            log.info("")
+            log.info("=== Target city: %s | region=%s | queries=%d ===", city, region or "(none)", len(queries))
 
-            # Fallback: old API (single page) if New returned nothing
-            if not normalized and _KEY_OLD:
-                raw_old = await _search_old(client, query)
-                for p in raw_old:
-                    result = _normalize_old(p)
-                    if result:
-                        normalized.append(result)
-                log.info("  → %d valid results (Places old, fallback)", len(normalized))
+            for query in queries:
+                log.info("Searching: '%s'", query)
+                normalized: list[tuple[str, dict]] = []
 
-            for place_id, payload in normalized:
-                if place_id in seen_ids:
-                    skipped += 1
-                    continue
-                seen_ids.add(place_id)
+                # Primary: Places API (New) with pagination
+                if _KEY_NEW:
+                    raw_places = await _search_new_all_pages(
+                        client,
+                        query,
+                        location_restriction,
+                        language,
+                        region,
+                    )
+                    for p in raw_places:
+                        result = _normalize_new(p, city)
+                        if result:
+                            normalized.append(result)
+                    log.info("  → %d valid results (Places New)", len(normalized))
 
-                existing = store.get_resource(place_id)
-                store.upsert_resource(place_id, payload)
-                if existing:
-                    updated += 1
-                else:
-                    inserted += 1
+                # Fallback: old API (single page) if New returned nothing
+                if not normalized and _KEY_OLD:
+                    raw_old = await _search_old(client, query, old_location, old_radius, language)
+                    for p in raw_old:
+                        result = _normalize_old(p, city)
+                        if result:
+                            normalized.append(result)
+                    log.info("  → %d valid results (Places old, fallback)", len(normalized))
 
-            # Polite delay between queries to avoid rate limiting
-            time.sleep(0.5)
+                for place_id, payload in normalized:
+                    if place_id in seen_ids:
+                        skipped += 1
+                        continue
+                    seen_ids.add(place_id)
+
+                    existing = store.get_resource(place_id)
+                    store.upsert_resource(place_id, payload)
+                    if existing:
+                        updated += 1
+                    else:
+                        inserted += 1
+
+                # Polite delay between queries to avoid rate limiting
+                time.sleep(0.5)
 
     log.info("")
     log.info("── Harvest complete ──────────────────────────")
@@ -302,6 +472,7 @@ async def main() -> None:
     log.info("  Skipped  : %d (no id/name or duplicate within run)", skipped)
     log.info("  Total unique places processed: %d", inserted + updated)
     log.info("  Firestore collection: clinical_resources/")
+    log.info("  Target cities: %s", ", ".join(cities))
 
 
 if __name__ == "__main__":
