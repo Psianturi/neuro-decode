@@ -11,6 +11,7 @@ Cost controls:
 import json
 import logging
 import os
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,6 @@ _COLLECTION = "clinical_resources"
 _CACHE_COLLECTION = "a2a_resource_cache"
 _FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "gen-lang-client-0348071142")
 _VALID_TYPES = {"clinic", "therapist", "hospital", "community", "inclusive_school"}
-_CURATED_KEYWORDS = {"jakarta", "indonesia"}
 
 # In-memory cache: location_key -> (result_dict, timestamp)
 _mem_cache = {}  # type: dict
@@ -33,6 +33,23 @@ _RATE_WINDOW = 3600.0
 
 def _cache_key(location, resource_type):
     return f"{location.lower().strip()}:{resource_type or 'all'}"
+
+
+def _split_locations(raw_location: str) -> list[str]:
+    text = (raw_location or "jakarta").strip()
+    parts = re.split(r"\s*(?:,|/|&|\band\b|\bdan\b)\s*", text, flags=re.IGNORECASE)
+    cleaned = []
+    seen = set()
+    for p in parts:
+        city = p.strip()
+        if not city:
+            continue
+        key = city.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(city)
+    return cleaned or ["jakarta"]
 
 
 def _get_mem_cache(key):
@@ -93,19 +110,15 @@ def _set_firestore_cache(key, result):
         logger.debug("[find_asd_resources] Firestore cache write failed: %s", exc)
 
 
-def _is_curated(location):
-    loc = location.strip().lower()
-    return any(kw in loc for kw in _CURATED_KEYWORDS)
-
-
 def _firestore_query(resource_type, limit, location):
     try:
         from google.cloud import firestore
         from google.cloud.firestore_v1.base_query import FieldFilter
+        city_norm = (location or "jakarta").strip().lower()
         client = firestore.Client(project=_FIRESTORE_PROJECT)
         ref = client.collection(_COLLECTION)
         ref = ref.where(filter=FieldFilter("is_active", "==", True))
-        ref = ref.where(filter=FieldFilter("city", "==", "jakarta"))
+        ref = ref.where(filter=FieldFilter("city", "==", city_norm))
         if resource_type and resource_type.lower() in _VALID_TYPES:
             ref = ref.where(filter=FieldFilter("resource_type", "==", resource_type.lower()))
         docs = ref.limit(limit).stream()
@@ -191,37 +204,86 @@ def find_asd_resources(
     location = (location or "jakarta").strip()
     rtype = (resource_type or "").strip()
     limit = max(1, min(int(limit), 20))
-    key = _cache_key(location, rtype)
+    locations = _split_locations(location)
 
-    if _is_curated(location):
-        return json.dumps(_firestore_query(rtype, limit, location), ensure_ascii=False, default=str)
+    # Single city keeps legacy response shape for compatibility.
+    if len(locations) == 1:
+        loc = locations[0]
+        key = _cache_key(loc, rtype)
 
-    cached = _get_mem_cache(key)
-    if cached:
-        logger.info("[find_asd_resources] mem cache hit: %s", key)
-        return json.dumps({**cached, "cached": True}, ensure_ascii=False, default=str)
+        curated = _firestore_query(rtype, limit, loc)
+        if curated.get("total", 0) > 0 and "error" not in curated:
+            return json.dumps(curated, ensure_ascii=False, default=str)
 
-    cached = _get_firestore_cache(key)
-    if cached:
-        logger.info("[find_asd_resources] Firestore cache hit: %s", key)
-        _set_mem_cache(key, cached)
-        return json.dumps({**cached, "cached": True}, ensure_ascii=False, default=str)
+        cached = _get_mem_cache(key)
+        if cached:
+            logger.info("[find_asd_resources] mem cache hit: %s", key)
+            return json.dumps({**cached, "cached": True}, ensure_ascii=False, default=str)
 
-    if _is_rate_limited(key):
-        logger.warning("[find_asd_resources] Rate limit hit for: %s", key)
-        return json.dumps({
-            "resources": [],
-            "total": 0,
-            "source": "rate_limited",
-            "location": location,
-            "note": "Too many requests for this location. Please try again in an hour.",
-        }, ensure_ascii=False)
+        cached = _get_firestore_cache(key)
+        if cached:
+            logger.info("[find_asd_resources] Firestore cache hit: %s", key)
+            _set_mem_cache(key, cached)
+            return json.dumps({**cached, "cached": True}, ensure_ascii=False, default=str)
 
-    _record_call(key)
-    result = _web_search_query(location, rtype, limit)
+        if _is_rate_limited(key):
+            logger.warning("[find_asd_resources] Rate limit hit for: %s", key)
+            return json.dumps({
+                "resources": [],
+                "total": 0,
+                "source": "rate_limited",
+                "location": loc,
+                "note": "Too many requests for this location. Please try again in an hour.",
+            }, ensure_ascii=False)
 
-    if "error" not in result:
-        _set_mem_cache(key, result)
-        _set_firestore_cache(key, result)
+        _record_call(key)
+        result = _web_search_query(loc, rtype, limit)
+        if "error" not in result:
+            _set_mem_cache(key, result)
+            _set_firestore_cache(key, result)
+        return json.dumps(result, ensure_ascii=False, default=str)
 
-    return json.dumps(result, ensure_ascii=False, default=str)
+    # Multi-city: aggregate one response per location.
+    per_location = []
+    for loc in locations:
+        key = _cache_key(loc, rtype)
+
+        curated = _firestore_query(rtype, limit, loc)
+        if curated.get("total", 0) > 0 and "error" not in curated:
+            per_location.append(curated)
+            continue
+
+        cached = _get_mem_cache(key)
+        if cached:
+            per_location.append({**cached, "cached": True})
+            continue
+
+        cached = _get_firestore_cache(key)
+        if cached:
+            _set_mem_cache(key, cached)
+            per_location.append({**cached, "cached": True})
+            continue
+
+        if _is_rate_limited(key):
+            per_location.append({
+                "resources": [],
+                "total": 0,
+                "source": "rate_limited",
+                "location": loc,
+                "note": "Too many requests for this location. Please try again in an hour.",
+            })
+            continue
+
+        _record_call(key)
+        result = _web_search_query(loc, rtype, limit)
+        if "error" not in result:
+            _set_mem_cache(key, result)
+            _set_firestore_cache(key, result)
+        per_location.append(result)
+
+    aggregated = {
+        "query_locations": locations,
+        "results_by_location": per_location,
+        "source": "mixed",
+    }
+    return json.dumps(aggregated, ensure_ascii=False, default=str)
