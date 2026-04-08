@@ -4,6 +4,7 @@ Agent card (public):  GET  /.well-known/agent-card.json
 Health check:         GET  /health
 A2A endpoint (auth):  POST /   (requires X-API-Key header, enforced by middleware)
 """
+import asyncio
 import logging
 import os
 
@@ -17,6 +18,13 @@ from middleware import ApiKeyMiddleware, load_api_keys  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_MARKERS = ("503", "429", "unavailable", "overloaded", "resource exhausted")
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _RETRYABLE_MARKERS)
 
 app = FastAPI(title="NeuroDecode A2A Agent")
 app.add_middleware(ApiKeyMiddleware)
@@ -182,35 +190,51 @@ async def a2a_endpoint(request: dict) -> dict:
 
         response_text = ""
         last_fn_resp_data = None
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session.id,
-            new_message=content,
-        ):
-            is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
-            error_code = getattr(event, "error_code", None)
-            author = getattr(event, "author", "?")
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                response_text = ""
+                last_fn_resp_data = None
+                async for event in runner.run_async(
+                    user_id=user_id,
+                    session_id=session.id,
+                    new_message=content,
+                ):
+                    is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
+                    error_code = getattr(event, "error_code", None)
+                    author = getattr(event, "author", "?")
 
-            if hasattr(event, "content") and event.content and event.content.parts:
-                for i, part in enumerate(event.content.parts):
-                    txt = getattr(part, "text", None)
-                    fn_call = getattr(part, "function_call", None)
-                    fn_resp = getattr(part, "function_response", None)
-                    logger.info(
-                        "[a2a][event] author=%s final=%s err=%s part[%d] "
-                        "text=%s fn_call=%s fn_resp_keys=%s",
-                        author, is_final, error_code, i,
-                        repr(txt[:300]) if txt else None,
-                        repr(fn_call)[:200] if fn_call else None,
-                        list(fn_resp.response.keys()) if fn_resp and hasattr(fn_resp, "response") else None,
+                    if hasattr(event, "content") and event.content and event.content.parts:
+                        for i, part in enumerate(event.content.parts):
+                            txt = getattr(part, "text", None)
+                            fn_call = getattr(part, "function_call", None)
+                            fn_resp = getattr(part, "function_response", None)
+                            logger.info(
+                                "[a2a][event] author=%s final=%s err=%s part[%d] "
+                                "text=%s fn_call=%s fn_resp_keys=%s",
+                                author, is_final, error_code, i,
+                                repr(txt[:300]) if txt else None,
+                                repr(fn_call)[:200] if fn_call else None,
+                                list(fn_resp.response.keys()) if fn_resp and hasattr(fn_resp, "response") else None,
+                            )
+                            if txt:
+                                response_text += (txt.decode("utf-8") if isinstance(txt, bytes) else str(txt))
+                            if fn_resp and hasattr(fn_resp, "response"):
+                                last_fn_resp_data = fn_resp.response
+                    else:
+                        logger.info("[a2a][event] author=%s final=%s err=%s content=None",
+                                    author, is_final, error_code)
+                break
+            except Exception as exc:
+                if _is_retryable_error(exc) and attempt < max_attempts - 1:
+                    wait = 2 * (attempt + 1)
+                    logger.warning(
+                        "[a2a] Transient model error on attempt %d/%d: %s. Retrying in %ds",
+                        attempt + 1, max_attempts, exc, wait,
                     )
-                    if txt:
-                        response_text += (txt.decode("utf-8") if isinstance(txt, bytes) else str(txt))
-                    if fn_resp and hasattr(fn_resp, "response"):
-                        last_fn_resp_data = fn_resp.response
-            else:
-                logger.info("[a2a][event] author=%s final=%s err=%s content=None",
-                            author, is_final, error_code)
+                    await asyncio.sleep(wait)
+                    continue
+                raise
 
         # Fallback: if model stopped without generating text, synthesize a readable reply
         if not response_text and last_fn_resp_data is not None:
@@ -273,6 +297,30 @@ async def a2a_endpoint(request: dict) -> dict:
 
     except Exception as exc:
         logger.error("[a2a] Error: %s", exc)
+
+        # Return a user-friendly task response for transient provider overload so orchestration UIs do not fail hard on occasional 503 spikes.
+        if _is_retryable_error(exc):
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "result": {
+                    "kind": "task",
+                    "id": request.get("id", "task-1"),
+                    "contextId": request.get("params", {}).get("sessionId", "default"),
+                    "status": {"state": "completed"},
+                    "artifacts": [{
+                        "artifactId": "response-1",
+                        "parts": [{
+                            "kind": "text",
+                            "text": (
+                                "Service is temporarily busy (high demand). "
+                                "Please retry this same request in a few seconds."
+                            ),
+                        }],
+                    }],
+                },
+            }
+
         return {
             "jsonrpc": "2.0",
             "id": request.get("id"),
