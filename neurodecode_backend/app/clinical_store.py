@@ -8,6 +8,7 @@ Schema per document
   "name": str,                  # Display name, e.g. "Anak Unggul"
   "resource_type": str,         # "clinic" | "therapist" | "hospital" |
                                 #  "community" | "inclusive_school" | "other"
+    "source": str,                # "curated" | "live_search"
   "city": str,                  # lowercase city slug, e.g. "jakarta"
   "address": str,               # Street / area detail, e.g. "Sunter, Jakarta Utara"
   "contact": str,               # Primary phone / WhatsApp
@@ -48,6 +49,13 @@ def _is_stale(last_verified_date: str | None, threshold_days: int = 365) -> bool
         return age > threshold_days
     except ValueError:
         return True
+
+
+def _normalize_source(value: Any) -> str:
+    raw = str(value or "").strip().lower().replace("-", "_")
+    if raw in {"curated", "live_search"}:
+        return raw
+    return "curated"
 
 
 # --------------------------------------------------------------------------- #
@@ -97,6 +105,7 @@ class ClinicalStore:
             data = doc.to_dict()
             data["id"] = doc.id
             data["stale"] = _is_stale(data.get("last_verified_date"))
+            data["source"] = _normalize_source(data.get("source"))
             results.append(data)
 
         return results
@@ -109,6 +118,7 @@ class ClinicalStore:
         data = doc.to_dict()
         data["id"] = doc.id
         data["stale"] = _is_stale(data.get("last_verified_date"))
+        data["source"] = _normalize_source(data.get("source"))
         return data
 
     # ---------------------------------------------------------------------- #
@@ -121,6 +131,7 @@ class ClinicalStore:
         doc = {
             "name": str(payload.get("name", "")).strip(),
             "resource_type": str(payload.get("resource_type", "")).lower().strip(),
+            "source": _normalize_source(payload.get("source")),
             "city": str(payload.get("city", "")).lower().strip(),
             "address": str(payload.get("address", "")).strip(),
             "contact": str(payload.get("contact", "")).strip(),
@@ -149,6 +160,7 @@ class ClinicalStore:
         doc = {
             "name": str(payload.get("name", "")).strip(),
             "resource_type": str(payload.get("resource_type", "")).lower().strip(),
+            "source": _normalize_source(payload.get("source")),
             "city": str(payload.get("city", "")).lower().strip(),
             "address": str(payload.get("address", "")).strip(),
             "contact": str(payload.get("contact", "")).strip(),

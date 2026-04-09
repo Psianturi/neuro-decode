@@ -327,6 +327,11 @@ class _ResourceCard extends StatelessWidget {
         _typeLabels[resource.resourceType] ?? resource.resourceType;
     final typeColor =
         _typeColors[resource.resourceType] ?? const Color(0xFF78909C);
+    final sourceKey = resource.source.toLowerCase();
+    final sourceLabel = sourceKey == 'live_search' ? 'Live Search' : 'Curated';
+    final sourceColor = sourceKey == 'live_search'
+        ? const Color(0xFF8E7CC3)
+        : const Color(0xFF5BA87A);
 
     return Container(
       padding: const EdgeInsets.all(NeuroColors.spacingMd),
@@ -350,6 +355,8 @@ class _ResourceCard extends StatelessWidget {
               _TypeBadge(label: typeLabel, color: typeColor),
             ],
           ),
+          const SizedBox(height: NeuroColors.spacingXs),
+          _SourceBadge(label: sourceLabel, color: sourceColor),
           if (resource.stale) ...[
             const SizedBox(height: NeuroColors.spacingXs),
             Row(
@@ -483,6 +490,41 @@ class _TypeBadge extends StatelessWidget {
               color: color,
               fontWeight: FontWeight.w600,
             ),
+      ),
+    );
+  }
+}
+
+class _SourceBadge extends StatelessWidget {
+  const _SourceBadge({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: NeuroColors.spacingSm,
+        vertical: NeuroColors.spacingXs,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(NeuroColors.radiusPill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.verified_outlined, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            'Source: $label',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
       ),
     );
   }

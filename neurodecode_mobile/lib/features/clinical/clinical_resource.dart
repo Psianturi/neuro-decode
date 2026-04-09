@@ -3,6 +3,7 @@ class ClinicalResource {
     required this.id,
     required this.name,
     required this.resourceType,
+    required this.source,
     required this.city,
     this.address,
     this.contact,
@@ -16,6 +17,7 @@ class ClinicalResource {
   final String id;
   final String name;
   final String resourceType;
+  final String source;
   final String city;
   final String? address;
   final String? contact;
@@ -36,6 +38,7 @@ class ClinicalResource {
       id: id,
       name: json['name'] as String? ?? '',
       resourceType: json['resource_type'] as String? ?? 'other',
+      source: json['source'] as String? ?? 'curated',
       city: json['city'] as String? ?? '',
       address: json['address'] as String?,
       contact: json['contact'] as String?,
