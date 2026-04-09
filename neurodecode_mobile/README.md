@@ -11,7 +11,7 @@ The app gives caregivers & parents a real-time co-pilot during stressful sensory
 3. Review session summaries and trigger history.
 4. Set and save a child's support profile (triggers, calming strategies, communication style).
 5. Approve AI-suggested memory actions from past sessions with one tap.
-6. Browse 198 Jakarta ASD clinics, therapists, hospitals, and inclusive schools.
+6. Browse curated ASD clinics, therapists, hospitals, and inclusive schools across multiple cities (city selector in Find Help).
 7. Receive proactive follow-up push notifications hours after high-severity sessions.
 
 ## Navigation (4 Tabs)
@@ -46,6 +46,7 @@ Bottom navigation bar:
 
 4. **Find Help Screen** *(new in Phase 4)*
    - Loads up to 100 active resources from backend `GET /clinical-resources`
+   - City selector (manual) to switch resource lookup by city
    - Filter chips: All / Clinic / Therapist / School / Hospital / Community
    - Resource cards: name, type badge (color-coded), address, tap-to-copy phone number, Instagram handle, service tags, staleness warning
    - Pull-to-refresh, error state with retry

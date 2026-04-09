@@ -88,12 +88,12 @@ Full build history from initial prototype to current state, plus planned next st
 
 *"Bridging the gap between digital assistance and real-world care — connect caregivers with specialized ASD clinics, occupational therapists, or emergency telemedicine services."*
 
-- Google Places API (New) harvest script: 196 ASD-relevant resources for Jakarta (clinics, therapists, hospitals, inclusive schools, community centres) stored in Firestore `clinical_resources/`.
-- 2 manually seeded entries for Anak Unggul (Sunter + Kelapa Gading locations).
+- Google Places API (New) harvest pipeline now supports multi-city and multi-country runs into Firestore `clinical_resources/`.
+- Current active curated coverage: 779+ ASD resources across 10 cities (Jakarta, Bandung, Surabaya, Medan, Yogyakarta, Makassar, Bangkok, Singapore, Kuala Lumpur, New York).
 - 3 Firestore composite indexes for efficient filtering: `city+is_active`, `resource_type+is_active`, `city+resource_type+is_active`.
 - REST API: `GET /clinical-resources` (filters: city, resource_type, active_only), `GET /clinical-resources/{id}`.
 - Admin write API: `POST` / `PATCH /admin/clinical-resources` guarded by `X-Admin-Secret`.
-- Flutter **Find Help** tab (4th bottom-nav item): resource cards with type badge, address, tap-to-copy phone, staleness warning, and filter chips (All / Clinic / Therapist / School / Hospital / Community).
+- Flutter **Find Help** tab (4th bottom-nav item): city selector + resource cards with type badge, address, tap-to-copy phone, staleness warning, and filter chips (All / Clinic / Therapist / School / Hospital / Community).
 
 ---
 
@@ -135,13 +135,16 @@ Full build history from initial prototype to current state, plus planned next st
 
 *Expose NeuroDecode's caregiver tools as a standards-compliant A2A (Agent-to-Agent) service so any AI platform or orchestrator can invoke them.*
 
-- `neurodecode_a2a` microservice: Google ADK `Agent` wrapping 4 callable tools, deployed as a separate Cloud Run service.
+- `neurodecode_a2a` microservice: Google ADK `Agent` wrapping 7 callable tools, deployed as a separate Cloud Run service.
 - `find_asd_resources` — Jakarta uses curated Firestore database (198 resources); all other cities hit live Google Search + Gemini for real-time results worldwide.
 - `suggest_interventions` — evidence-based strategies for a given ASD trigger (e.g. "loud noise sensitivity").
 - `get_de_escalation_steps` — step-by-step active-distress protocol for caregivers.
 - `assess_escalation_risk` — structured risk assessment from a behavioral pattern description.
+- `draft_therapist_handover` — structured clinician-ready handover note from caregiver observations.
+- `assess_caregiver_wellbeing` — caregiver stress/burnout screening with practical support guidance.
+- `get_sensory_diet_plan` — personalized OT-style sensory regulation plan by age/profile/context.
 - A2A agent card at `/.well-known/agent-card.json` (protocolVersion 0.2.2, preferredTransport JSONRPC).
-- 3-layer cost control: in-memory LRU cache → Firestore 24h TTL cache → 5 req/hr rate limit per location.
+- 3-layer cost control: in-memory cache → Firestore 24h TTL cache → 20 req/hr rate limit per location.
 - Optional API key auth via `ApiKeyMiddleware` (`A2A_REQUIRE_AUTH` env flag).
 - Dedicated Cloud Build pipeline (`cloudbuild_a2a.yaml`) — separate from main backend deployments.
 
@@ -179,7 +182,7 @@ Current implemented user flow:
 5. Review post-session summary in History / Insights.
 6. Save suggested memories (trigger/follow-up) to profile memory.
 7. Receive proactive follow-up push notification hours after a high-severity session.
-8. Browse ASD clinics, therapists, and schools in the **Find Help** tab.
+8. Browse ASD clinics, therapists, and schools by city in the **Find Help** tab.
 
 Major capabilities running in production:
 
@@ -191,7 +194,7 @@ Major capabilities running in production:
 6. Suggested memory actions from History / Insights.
 7. Rule-based proactive push notifications after session close (FCM).
 8. Time-delayed follow-up push notifications via Cloud Scheduler (every 15 min scan, FCM delivery confirmed).
-9. Clinical resource directory: 198 Jakarta ASD resources with REST API and Flutter UI.
+9. Clinical resource directory: 779+ ASD resources across 10 cities with REST API and city-aware Flutter UI.
 
 ## Why It Matters
 
@@ -221,7 +224,7 @@ flowchart LR
         B_RELEVANCE[RelevanceFilterAgent]
         B_RULES[Notification Engine]
         B_FOLLOW[followup_engine]
-        B_CLINICAL[clinical_store — 198 resources]
+        B_CLINICAL[clinical_store — 779+ resources, 10 cities]
     end
 
     subgraph A2AService["NeuroDecode A2A Agent — Cloud Run"]
@@ -230,6 +233,9 @@ flowchart LR
         A_T2[suggest_interventions]
         A_T3[get_de_escalation_steps]
         A_T4[assess_escalation_risk]
+        A_T5[draft_therapist_handover]
+        A_T6[assess_caregiver_wellbeing]
+        A_T7[get_sensory_diet_plan]
     end
 
     subgraph Moltbook["neurodecode-moltbook — Cloud Run"]
@@ -243,7 +249,7 @@ flowchart LR
         FS_P[profile_memory]
         FS_CI[community_insights]
         FS_N[notifications]
-        FS_CR[clinical_resources — 198]
+        FS_CR[clinical_resources — 779+ across 10 cities]
     end
 
     Gemini([Gemini Live API])
@@ -285,6 +291,9 @@ flowchart LR
     A_AGENT --> A_T2
     A_AGENT --> A_T3
     A_AGENT --> A_T4
+    A_AGENT --> A_T5
+    A_AGENT --> A_T6
+    A_AGENT --> A_T7
     A_T1 -->|jakarta curated| FS_CR
     A_T1 -->|other cities live| SearchAPI
     CB -->|dev branch auto deploy| Backend
@@ -320,13 +329,14 @@ NeuroDecode/
 |  |  |- rule_debug_store.py
 |  |  |- models/
 |- neurodecode_a2a/           ← Phase 7 A2A Agent service
-|  |- agent.py               ← ADK Agent definition (4 tools)
+|  |- agent.py               ← ADK Agent definition (7 tools)
 |  |- app.py                 ← FastAPI server + agent card
 |  |- middleware.py          ← ApiKeyMiddleware
 |  |- requirements.txt
 |  |- tools/
-|  |  |- clinical.py         ← find_asd_resources (Jakarta + global)
+|  |  |- clinical.py         ← find_asd_resources (multi-city curated + global)
 |  |  |- asd_reasoning.py    ← suggest_interventions, de-escalation, risk
+|  |  |- caregiver_support.py← handover, wellbeing, sensory diet
 |- neurodecode_mobile/
    |- README.md
    |- pubspec.yaml
