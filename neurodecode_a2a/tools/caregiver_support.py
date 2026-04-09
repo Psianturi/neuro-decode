@@ -77,7 +77,8 @@ def draft_therapist_handover(
                                  Example: 'deep pressure vest, noise-cancelling headphones,
                                  5-minute warning before transitions, visual schedule'
         session_count: Number of live sessions or observations this is based on.
-                       Example: '8 sessions over 3 weeks'. Use 'unknown' if unsure.
+                       Example: '8 sessions over 3 weeks'. Use 'unknown' if not sure.
+                       Default: 'unknown'.
 
     Returns:
         A structured clinical handover note in plain text, ready to share with a therapist.
