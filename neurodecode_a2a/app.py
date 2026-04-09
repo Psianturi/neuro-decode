@@ -140,6 +140,54 @@ async def agent_card() -> JSONResponse:
                     "Evaluate escalation risk: high-pitched sounds, covering ears",
                 ],
             },
+            {
+                "id": "draft_therapist_handover",
+                "name": "Draft Therapist Handover Note",
+                "description": (
+                    "Generate a structured clinical briefing note for a therapist or "
+                    "psychiatrist appointment, based on caregiver's behavioral observations, "
+                    "identified triggers, and effective interventions. Bridges the gap between "
+                    "daily caregiver experience and clinical consultation — the 'last mile' "
+                    "of ASD care coordination."
+                ),
+                "tags": ["ASD", "clinical", "therapist", "handover", "appointment", "FHIR-ready"],
+                "examples": [
+                    "Help me prepare notes for my child's therapy appointment tomorrow",
+                    "Draft a handover note: child has increased meltdowns, triggers are loud noise and transitions",
+                    "Create a clinical briefing based on 3 weeks of observations",
+                ],
+            },
+            {
+                "id": "assess_caregiver_wellbeing",
+                "name": "Assess Caregiver Wellbeing",
+                "description": (
+                    "Screen caregiver stress and burnout indicators and provide personalized "
+                    "self-care guidance and support resource recommendations. Addresses the "
+                    "whole family system — caregiver mental health directly impacts child outcomes."
+                ),
+                "tags": ["ASD", "caregiver", "burnout", "wellbeing", "mental-health", "support"],
+                "examples": [
+                    "I've been exhausted and snapping at my child more. I need help.",
+                    "Assess my stress level as a caregiver — I haven't slept properly in weeks",
+                    "What support resources should I look for as an ASD caregiver?",
+                ],
+            },
+            {
+                "id": "get_sensory_diet_plan",
+                "name": "Get Sensory Diet Plan",
+                "description": (
+                    "Generate a personalized sensory diet — a structured daily set of "
+                    "sensory input activities based on occupational therapy principles — "
+                    "tailored to the child's sensory profile, age, and environment. "
+                    "Helps children with ASD self-regulate throughout the day."
+                ),
+                "tags": ["ASD", "sensory", "OT", "occupational-therapy", "regulation", "routine"],
+                "examples": [
+                    "My child seeks deep pressure and is sensitive to noise. Make a sensory diet.",
+                    "Create a sensory regulation plan for a 7-year-old who spins and covers ears at school",
+                    "Sensory diet for home use: child is hypersensitive to touch and avoids crowds",
+                ],
+            },
         ],
     })
 
