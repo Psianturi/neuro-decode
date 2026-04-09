@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../theme/app_theme.dart';
 import 'clinical_resource.dart';
@@ -20,6 +22,8 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
   String? _errorMessage;
   String? _selectedType; // null = All
   String? _selectedCity = 'jakarta';
+  ({String label, String? value})? _detectedCity;
+  bool _isResolvingLocation = false;
 
   static const _cities = [
     (label: 'All Cities', value: null),
@@ -48,6 +52,114 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  List<({String label, String? value})> get _cityOptions {
+    final options = List<({String label, String? value})>.from(_cities);
+    final detected = _detectedCity;
+    if (detected != null) {
+      final alreadyExists = options.any(
+        (c) =>
+            (c.value ?? '').toLowerCase() ==
+            (detected.value ?? '').toLowerCase(),
+      );
+      if (!alreadyExists) {
+        options.insert(1, detected);
+      }
+    }
+    return options;
+  }
+
+  String _normalizeCity(String raw) {
+    var value = raw.trim().toLowerCase();
+    value = value.replaceFirst(RegExp(r'^(kota|city of)\s+'), '');
+    return value;
+  }
+
+  String _prettyCity(String raw) {
+    return raw
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .map((w) => '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+
+  void _showMessage(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _useCurrentLocation() async {
+    if (_isResolvingLocation) return;
+    setState(() => _isResolvingLocation = true);
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        _showMessage(
+            'Location services are disabled. Please enable GPS first.');
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        _showMessage(
+            'Location permission denied. Please select city manually.');
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.low,
+        ),
+      );
+
+      final placemarks = await placemarkFromCoordinates(
+        pos.latitude,
+        pos.longitude,
+      );
+
+      final first = placemarks.isNotEmpty ? placemarks.first : null;
+      final rawCity = first?.locality ??
+          first?.subAdministrativeArea ??
+          first?.administrativeArea ??
+          '';
+      final normalizedCity = _normalizeCity(rawCity);
+
+      if (normalizedCity.isEmpty) {
+        if (!mounted) return;
+        _showMessage('Could not detect city from your current location.');
+        return;
+      }
+
+      final pretty = _prettyCity(rawCity);
+      if (!mounted) return;
+      setState(() {
+        _detectedCity = (label: 'Detected: $pretty', value: normalizedCity);
+        _selectedCity = normalizedCity;
+      });
+      await _load();
+      if (!mounted) return;
+      _showMessage('Using current location: $pretty');
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage(
+          'Failed to get current location. Please select city manually.');
+    } finally {
+      if (mounted) {
+        setState(() => _isResolvingLocation = false);
+      }
+    }
   }
 
   Future<void> _load() async {
@@ -90,6 +202,23 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
       appBar: AppBar(
         title: const Text('Find Help'),
         actions: [
+          if (_isResolvingLocation)
+            const Padding(
+              padding: EdgeInsets.only(right: NeuroColors.spacingSm),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              onPressed: _useCurrentLocation,
+              icon: const Icon(Icons.my_location_outlined),
+              tooltip: 'Use current location',
+            ),
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.only(right: NeuroColors.spacingMd),
@@ -107,7 +236,7 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _CitySelectorRow(
-            cities: _cities,
+            cities: _cityOptions,
             selected: _selectedCity,
             onSelected: (city) {
               if (_selectedCity == city) return;
@@ -169,7 +298,7 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
         child: Text(
           _selectedCity == null
               ? 'No resources found for this filter.'
-              : 'No resources found in ${_selectedCity![0].toUpperCase()}${_selectedCity!.substring(1)} for this filter.',
+              : 'No resources found in ${_prettyCity(_selectedCity!)} for this filter.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
       );
