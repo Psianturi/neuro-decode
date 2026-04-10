@@ -36,9 +36,10 @@ load_dotenv()
 app = FastAPI(title="NeuroDecode AI Backend")
 
 IDLE_TIMEOUT_SECONDS = 120
-AUDIO_OBSERVER_COOLDOWN_SECONDS = 6
+AUDIO_OBSERVER_COOLDOWN_SECONDS = 4
 VISION_OBSERVER_COOLDOWN_SECONDS = 4
-MIN_AUDIO_BYTES_FOR_ANALYSIS = 32000  # ~1s of 16kHz mono PCM16
+MIN_AUDIO_BYTES_FOR_ANALYSIS = 20000 
+MIN_AUDIO_BYTES_AT_TURN_END = 6000  # Flush short turns so observer still gets a chance.
 LATEST_SESSION_MAX_ITEMS = 10
 
 
@@ -120,6 +121,99 @@ def _sanitize_caregiver_text(text: str) -> str:
     return sanitized
 
 
+def _looks_like_location_resource_query(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    compact = re.sub(r"\s+", "", normalized)
+
+    resource_terms = (
+        "klinik",
+        "clinic",
+        "terapis",
+        "terapi",
+        "pusat terapi",
+        "therapy center",
+        "centre",
+        "center",
+        "hospital",
+        "rumah sakit",
+        "inclusive school",
+        "sekolah inklusif",
+        "resource",
+        "rujukan",
+        "rekomendasi",
+        "recommend",
+        "tempat",
+        "lokasi",
+        "daerah",
+        "di mana",
+        "dimana",
+    )
+    asd_terms = ("asd", "autis", "autism", "special needs", "abk")
+
+    has_resource_term = any(term in normalized for term in resource_terms) or any(
+        term.replace(" ", "") in compact for term in resource_terms
+    )
+    has_asd_term = any(term in normalized for term in asd_terms) or any(
+        term.replace(" ", "") in compact for term in asd_terms
+    )
+    has_city_preposition = bool(re.search(r"\b(di|in)\s+[a-z][a-z\s\-]{2,40}", normalized))
+
+    # Require resource intent + (ASD mention or clear location cue)
+    return has_resource_term and (has_asd_term or has_city_preposition)
+
+
+def _extract_location_hint(text: str) -> str | None:
+    matches = re.findall(r"\b(?:di|in)\s+([a-zA-Z][a-zA-Z\s\-]{2,40})", text)
+    if not matches:
+        return None
+    candidate = matches[-1]
+    candidate = re.sub(r"[^a-zA-Z\s\-]", "", candidate).strip()
+    if not candidate:
+        return None
+    candidate = re.sub(r"\s{2,}", " ", candidate)
+
+    # ASR sometimes inserts spaces inside city names, e.g. "Ba ndung" -> "bandung".
+    compact_candidate = re.sub(r"\s+", "", candidate).lower()
+    known_city_compact = {
+        "jakarta": "jakarta",
+        "bandung": "bandung",
+        "surabaya": "surabaya",
+        "yogyakarta": "yogyakarta",
+        "jogja": "yogyakarta",
+        "makassar": "makassar",
+        "bangkok": "bangkok",
+        "medan": "medan",
+        "depok": "depok",
+        "bekasi": "bekasi",
+        "bogor": "bogor",
+        "tangerang": "tangerang",
+    }
+    if compact_candidate in known_city_compact:
+        return known_city_compact[compact_candidate]
+
+    return candidate[:40]
+
+
+def _format_curated_resource_hint(resources: list[dict[str, object]]) -> str:
+    lines: list[str] = []
+    for item in resources[:3]:
+        name = str(item.get("name") or "Resource").strip()
+        city = str(item.get("city") or "").strip()
+        resource_type = str(item.get("resource_type") or "").strip()
+        contact = str(item.get("contact") or "").strip()
+        bits = [name]
+        if city:
+            bits.append(f"city={city}")
+        if resource_type:
+            bits.append(f"type={resource_type}")
+        if contact:
+            bits.append(f"contact={contact}")
+        lines.append("; ".join(bits))
+    return " | ".join(lines)
+
+
 def _truncate_items(items: list[str], max_items: int = 14) -> list[str]:
     if len(items) <= max_items:
         return items
@@ -132,11 +226,13 @@ def _build_summary_prompt(
     close_reason: str,
     observer_visual_notes: list[str],
     observer_audio_notes: list[str],
+    specialist_guidance: list[str],
     transcript_in: list[str],
     transcript_out: list[str],
 ) -> str:
     clipped_visual = _truncate_items(observer_visual_notes, 10)
     clipped_audio = _truncate_items(observer_audio_notes, 10)
+    clipped_guidance = _truncate_items(specialist_guidance, 8)
     clipped_in = _truncate_items(transcript_in, 10)
     clipped_out = _truncate_items(transcript_out, 10)
 
@@ -152,14 +248,16 @@ def _build_summary_prompt(
         "[Audio Observer Note] verbatim in the output.\n\n"
         "Output MUST follow this exact structure:\n"
         "TITLE: <short title>\n"
-        "TRIGGERS_VISUAL: <1 sentence based ONLY on Visual Observer Notes below>\n"
-        "TRIGGERS_AUDIO: <1 sentence based ONLY on Audio Observer Notes below>\n"
-        "AGENT_ACTIONS: <1-2 sentences>\n"
-        "FOLLOW_UP: <1-2 sentences>\n"
+        "TRIGGERS_VISUAL: <1 sentence with concrete visual evidence, if any>\n"
+        "TRIGGERS_AUDIO: <1 sentence with concrete audio evidence, if any>\n"
+        "AGENT_ACTIONS: <2-3 short sentences: immediate action taken + why it fits this child>\n"
+        "FOLLOW_UP: <2-3 short sentences: next 24h plan, prevention step, and when to seek specialist help>\n"
+        "SPECIALIST_GUIDANCE: <1 sentence summarizing specialist/A2A guidance used; if none say 'No external specialist guidance used.'>\n"
         "SAFETY_NOTE: <1 sentence>\n\n"
         f"Session metadata:\n- Duration seconds: {duration_seconds}\n- Close reason: {close_reason}\n\n"
         f"Visual Observer Notes (camera/movement detection only):\n{json.dumps(clipped_visual, ensure_ascii=True)}\n\n"
         f"Audio Observer Notes (microphone/vocal detection only):\n{json.dumps(clipped_audio, ensure_ascii=True)}\n\n"
+        f"Specialist guidance snippets (A2A/resource enrichment):\n{json.dumps(clipped_guidance, ensure_ascii=True)}\n\n"
         f"Caregiver/user transcript excerpts:\n{json.dumps(clipped_in, ensure_ascii=True)}\n\n"
         f"Agent transcript excerpts:\n{json.dumps(clipped_out, ensure_ascii=True)}\n"
     )
@@ -172,6 +270,7 @@ def generate_session_summary(
     close_reason: str,
     observer_visual_notes: list[str],
     observer_audio_notes: list[str],
+    specialist_guidance: list[str],
     transcript_in: list[str],
     transcript_out: list[str],
 ) -> str:
@@ -180,6 +279,7 @@ def generate_session_summary(
         close_reason=close_reason,
         observer_visual_notes=observer_visual_notes,
         observer_audio_notes=observer_audio_notes,
+        specialist_guidance=specialist_guidance,
         transcript_in=transcript_in,
         transcript_out=transcript_out,
     )
@@ -190,7 +290,7 @@ def generate_session_summary(
     if isinstance(text, str) and text.strip():
         return text.strip()
 
-    return "TITLE: Session Summary\nTRIGGERS_VISUAL: No strong visual trigger detected.\nTRIGGERS_AUDIO: No strong audio trigger detected.\nAGENT_ACTIONS: The agent provided calming, practical support in real time.\nFOLLOW_UP: Keep environment low-stimulation and monitor signs of overload.\nSAFETY_NOTE: This summary is non-diagnostic and for caregiver support only."
+    return "TITLE: Session Summary\nTRIGGERS_VISUAL: No strong visual trigger detected.\nTRIGGERS_AUDIO: No strong audio trigger detected.\nAGENT_ACTIONS: The agent provided calming, practical support in real time.\nFOLLOW_UP: Keep environment low-stimulation and monitor signs of overload.\nSPECIALIST_GUIDANCE: No external specialist guidance used.\nSAFETY_NOTE: This summary is non-diagnostic and for caregiver support only."
 
 
 def _extract_structured_summary(summary_text: str) -> dict[str, str]:
@@ -200,6 +300,7 @@ def _extract_structured_summary(summary_text: str) -> dict[str, str]:
         "TRIGGERS_AUDIO": "No strong audio trigger detected.",
         "AGENT_ACTIONS": "The agent provided calming support in real time.",
         "FOLLOW_UP": "Keep the environment low-stimulation and monitor overload signs.",
+        "SPECIALIST_GUIDANCE": "No external specialist guidance used.",
         "SAFETY_NOTE": "Non-diagnostic support summary for caregivers only.",
     }
 
@@ -1330,6 +1431,9 @@ async def ws_live(websocket: WebSocket) -> None:
         # A2A skill enrichment state — populated asynchronously, consumed on next observer note.
         _pending_skill_context: list[str] = []
         _active_skill_tasks: set[asyncio.Task[None]] = set()
+        specialist_guidance_log: list[str] = []
+        _last_resource_lookup_signature = ""
+        _last_resource_lookup_ts = 0.0
         print("[ws_live] Session started — Gemini connected")
 
         def queue_session_event(
@@ -1404,6 +1508,97 @@ async def ws_live(websocket: WebSocket) -> None:
                 return ""
             return " | ".join(profile_memory_cues[:3])
 
+        def _record_specialist_guidance(text: str) -> None:
+            cleaned = str(text or "").strip()
+            if not cleaned:
+                return
+            specialist_guidance_log.append(cleaned[:500])
+            if len(specialist_guidance_log) > 20:
+                del specialist_guidance_log[:-20]
+
+        async def _run_resource_lookup_enrichment(query_text: str, *, trigger_source: str) -> None:
+            nonlocal _last_resource_lookup_signature, _last_resource_lookup_ts
+            try:
+                if not settings.a2a_skill_enrichment_enabled or not settings.a2a_url:
+                    return
+
+                query = str(query_text or "").strip()
+                if not query or not _looks_like_location_resource_query(query):
+                    return
+
+                normalized_query = re.sub(r"\s+", " ", query.lower()).strip()
+                if len(normalized_query) < 12:
+                    return
+
+                location_hint = _extract_location_hint(query) or "unspecified"
+                signature = f"{location_hint.lower()}|{normalized_query}"
+                now = time.monotonic()
+                if signature == _last_resource_lookup_signature and (now - _last_resource_lookup_ts) < 20:
+                    return
+
+                _last_resource_lookup_signature = signature
+                _last_resource_lookup_ts = now
+
+                profile_ctx = _build_profile_context_snippet()
+                a2a_prompt = (
+                    "Use find_asd_resources to recommend ASD-relevant resources for this caregiver query. "
+                    "Return concise practical output: 3-5 options with city, type, and contact/next step when available. "
+                    f"Caregiver query: {query}. "
+                    f"Location hint: {location_hint}."
+                )
+                if profile_ctx:
+                    a2a_prompt += f" Child profile context: {profile_ctx}."
+
+                resource_ctx = await _a2a_call_skill(
+                    a2a_url=settings.a2a_url,
+                    prompt=a2a_prompt,
+                    timeout=3.0,
+                )
+                source = "a2a"
+
+                # Fallback to curated Firestore only for Jakarta lookups when A2A is unavailable.
+                if not resource_ctx and location_hint.lower() == "jakarta":
+                    try:
+                        curated = _get_clinical_store().list_resources(
+                            city="jakarta",
+                            active_only=True,
+                            limit=3,
+                        )
+                        if curated:
+                            resource_ctx = _format_curated_resource_hint(curated)
+                            source = "firestore_curated"
+                    except Exception as e:
+                        print(f"[resource_lookup] curated fallback failed: {e}")
+
+                if resource_ctx:
+                    _record_specialist_guidance(f"[ResourceLookup:{source}] {resource_ctx}")
+                    await session.send_observer_note(
+                        "Specialist resource context for this caregiver request: "
+                        f"{resource_ctx}",
+                        end_of_turn=False,
+                    )
+                    queue_session_event(
+                        "resource_lookup_enriched",
+                        source="a2a_skill",
+                        text=resource_ctx,
+                        metadata={
+                            "trigger_source": trigger_source,
+                            "lookup_source": source,
+                            "location_hint": location_hint,
+                        },
+                    )
+                    print(
+                        "[a2a_skill] ResourceLookup: enrichment injected "
+                        f"(source={source}, trigger={trigger_source}, chars={len(resource_ctx)})"
+                    )
+                else:
+                    print(
+                        "[a2a_skill] ResourceLookup: no enrichment available "
+                        f"(trigger={trigger_source}, fail-open)"
+                    )
+            except Exception as e:
+                print(f"[a2a_skill] ResourceLookup failed (fail-open): {e}")
+
         def _consume_skill_context() -> str:
             """Pop all pending A2A skill results and return as a single enrichment string."""
             if not _pending_skill_context:
@@ -1420,7 +1615,9 @@ async def ws_live(websocket: WebSocket) -> None:
             async def _fetch() -> None:
                 result = await _a2a_call_skill(a2a_url=settings.a2a_url, prompt=prompt)
                 if result:
-                    _pending_skill_context.append(f"[{skill_label}] {result}")
+                    packaged = f"[{skill_label}] {result}"
+                    _pending_skill_context.append(packaged)
+                    _record_specialist_guidance(packaged)
                     print(f"[a2a_skill] {skill_label}: enrichment ready ({len(result)} chars)")
 
             task: asyncio.Task[None] = asyncio.create_task(_fetch())
@@ -1522,6 +1719,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     close_reason=close_reason,
                     observer_visual_notes=list(observer_visual_log),
                     observer_audio_notes=list(observer_audio_log),
+                    specialist_guidance=list(specialist_guidance_log),
                     transcript_in=list(transcript_in_log),
                     transcript_out=list(transcript_out_log),
                 )
@@ -1548,6 +1746,7 @@ async def ws_live(websocket: WebSocket) -> None:
                     "stats": {
                         "audio_trigger_count": len(observer_audio_log),
                         "visual_trigger_count": len(observer_visual_log),
+                        "specialist_guidance_count": len(specialist_guidance_log),
                         "transcript_in_count": len(transcript_in_log),
                         "transcript_out_count": len(transcript_out_log),
                     },
@@ -1557,6 +1756,7 @@ async def ws_live(websocket: WebSocket) -> None:
                         "triggers_audio": structured["TRIGGERS_AUDIO"],
                         "agent_actions": structured["AGENT_ACTIONS"],
                         "follow_up": structured["FOLLOW_UP"],
+                        "specialist_guidance": structured["SPECIALIST_GUIDANCE"],
                         "safety_note": structured["SAFETY_NOTE"],
                     },
                 }
@@ -1685,16 +1885,33 @@ async def ws_live(websocket: WebSocket) -> None:
                     if text.strip():
                         transcript_in_log.append(text.strip())
                         queue_session_event("client_text_message", source="client_text", text=text.strip())
+                        await _run_resource_lookup_enrichment(text.strip(), trigger_source="client_text")
                     await session.send_text(text, bool(end_of_turn))
                 elif msg_type == "audio_stream_end":
                     print(f"[client\u2192gemini] audio_stream_end — total {audio_chunk_count} chunks, {total_audio_bytes} bytes sent to Gemini")
                     audio_turn_open = False
                     awaiting_model_response = True
-                    # Clear any residual audio in the observer buffer so it does not
-                    # contaminate the next turn's inference window.
+                    # Flush residual audio buffer at turn end so short turns still get observer analysis.
                     if audio_observer_buffer:
-                        print(f"[observer] Clearing {len(audio_observer_buffer)} residual bytes from observer buffer at turn end")
+                        residual_audio = bytes(audio_observer_buffer)
                         audio_observer_buffer.clear()
+                        now = time.monotonic()
+                        if (
+                            len(residual_audio) >= MIN_AUDIO_BYTES_AT_TURN_END
+                            and (now - last_audio_note_ts) >= 1.0
+                            and (audio_observer_task is None or audio_observer_task.done())
+                        ):
+                            last_audio_note_ts = now
+                            audio_observer_task = asyncio.create_task(run_audio_observer(residual_audio))
+                            print(
+                                "[observer] Submitted residual audio at turn end "
+                                f"({len(residual_audio)} bytes)"
+                            )
+                        else:
+                            print(
+                                "[observer] Residual audio skipped at turn end "
+                                f"(bytes={len(residual_audio)}, cooldown={round(now - last_audio_note_ts, 2)}s)"
+                            )
                     queue_session_event(
                         "audio_turn_submitted",
                         source="client_audio",
@@ -1820,6 +2037,14 @@ async def ws_live(websocket: WebSocket) -> None:
                             last_activity = time.monotonic()
                             if out.type == "transcript_in":
                                 transcript_in_log.append(out.text.strip())
+                                task = asyncio.create_task(
+                                    _run_resource_lookup_enrichment(
+                                        out.text.strip(),
+                                        trigger_source="transcript_in",
+                                    )
+                                )
+                                _active_skill_tasks.add(task)
+                                task.add_done_callback(_active_skill_tasks.discard)
                             elif out.type == "transcript_out":
                                 transcript_out_log.append(outgoing_text.strip())
                             elif out.type == "model_text":
