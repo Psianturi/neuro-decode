@@ -54,7 +54,7 @@ async def startup() -> None:
 
 @app.get("/.well-known/agent-card.json", include_in_schema=False)
 async def agent_card() -> JSONResponse:
-    """A2A agent card -- fetched by Prompt Opinion during registration."""
+    """A2A agent card -- A2A v1 compliant, fetched by Prompt Opinion during registration."""
     return JSONResponse({
         "name": "NeuroDecode ASD Caregiver Agent",
         "description": (
@@ -64,24 +64,36 @@ async def agent_card() -> JSONResponse:
             "intervention strategies, de-escalation protocols, and escalation "
             "risk assessments for caregivers of autistic children."
         ),
-        "url": _SERVICE_URL,
-        "version": "1.0.0",
-        "protocolVersion": "0.2.2",
-        "preferredTransport": "JSONRPC",
+        "version": "1.1.0",
         "provider": {
             "organization": "NeuroDecode AI",
             "url": "https://github.com/Psianturi/neuro-decode",
         },
+        # A2A v1: supportedInterfaces replaces url + preferredTransport
+        "supportedInterfaces": [
+            {
+                "url": _SERVICE_URL,
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0",
+            }
+        ],
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
-            "stateTransitionHistory": False,
         },
-        "authentication": {
-            "schemes": ["ApiKey"],
+        # A2A v1: securitySchemes uses discriminated union format
+        "securitySchemes": {
+            "apiKey": {
+                "apiKeySecurityScheme": {
+                    "location": "header",
+                    "name": "X-API-Key",
+                    "description": "API key for NeuroDecode A2A agent access",
+                }
+            }
         },
-        "defaultInputModes": ["text"],
-        "defaultOutputModes": ["text"],
+        "security": [{"apiKey": []}],
+        "defaultInputModes": ["text/plain"],
+        "defaultOutputModes": ["text/plain"],
         "skills": [
             {
                 "id": "find_asd_resources",
@@ -213,7 +225,7 @@ async def a2a_endpoint(request: dict) -> dict:
             session_service=session_service,
         )
 
-        # Extract message from A2A JSON-RPC request format
+        # Extract message — dual-accept: A2A v1 (field-presence) + v0.x (kind discriminator)
         params = request.get("params", {})
         message_text = ""
         if isinstance(params, dict):
@@ -221,7 +233,11 @@ async def a2a_endpoint(request: dict) -> dict:
             if isinstance(message, dict):
                 parts = message.get("parts", [])
                 for part in parts:
-                    if isinstance(part, dict) and part.get("kind") == "text":
+                    if not isinstance(part, dict):
+                        continue
+                    # v1 format: {"text": "..."} — field presence as discriminator
+                    # v0.x format: {"kind": "text", "text": "..."}
+                    if "text" in part and (part.get("kind", "text") == "text"):
                         message_text = part.get("text", "")
                         break
 
@@ -291,7 +307,11 @@ async def a2a_endpoint(request: dict) -> dict:
                             if txt:
                                 response_text += (txt.decode("utf-8") if isinstance(txt, bytes) else str(txt))
                             if fn_resp and hasattr(fn_resp, "response"):
-                                last_fn_resp_data = fn_resp.response
+                                # bytes-safe: convert any non-JSON-serializable values
+                                raw = fn_resp.response
+                                if isinstance(raw, bytes):
+                                    raw = raw.decode("utf-8", errors="replace")
+                                last_fn_resp_data = raw
                     else:
                         logger.info("[a2a][event] author=%s final=%s err=%s content=None",
                                     author, is_final, error_code)
@@ -351,17 +371,30 @@ async def a2a_endpoint(request: dict) -> dict:
 
             logger.warning("[a2a] No text response from model — using synthesized fallback")
 
+        import json as _json_safe
+
+        def _safe_json(obj):
+            """Recursively convert bytes/unknown types for JSON serialization."""
+            if isinstance(obj, bytes):
+                return obj.decode("utf-8", errors="replace")
+            if isinstance(obj, dict):
+                return {k: _safe_json(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_safe_json(v) for v in obj]
+            return obj
+
+        safe_response_text = _safe_json(response_text) if not isinstance(response_text, str) else response_text
+
         return {
             "jsonrpc": "2.0",
             "id": request.get("id"),
             "result": {
-                "kind": "task",
                 "id": request.get("id", "task-1"),
                 "contextId": session_id,
                 "status": {"state": "completed"},
                 "artifacts": [{
                     "artifactId": "response-1",
-                    "parts": [{"kind": "text", "text": response_text}]
+                    "parts": [{"text": safe_response_text}]
                 }],
             },
         }
