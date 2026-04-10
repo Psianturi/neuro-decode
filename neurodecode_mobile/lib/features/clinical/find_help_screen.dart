@@ -39,6 +39,49 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
     (label: 'New York', value: 'new york'),
   ];
 
+  static const _cityAliases = <String, List<String>>{
+    'jakarta': [
+      'jakarta',
+      'dki jakarta',
+      'daerah khusus ibukota jakarta',
+      'jakarta utara',
+      'jakarta selatan',
+      'jakarta barat',
+      'jakarta timur',
+      'jakarta pusat',
+      'tanjung priok',
+      'kelapa gading',
+      'kramat jati',
+      'cilandak',
+      'pasar minggu',
+      'kebon jeruk',
+      'menteng',
+    ],
+    'bandung': ['bandung', 'kota bandung', 'kabupaten bandung'],
+    'surabaya': ['surabaya', 'kota surabaya'],
+    'medan': ['medan', 'kota medan'],
+    'yogyakarta': [
+      'yogyakarta',
+      'jogja',
+      'jogjakarta',
+      'daerah istimewa yogyakarta',
+    ],
+    'makassar': ['makassar', 'kota makassar'],
+    'bangkok': ['bangkok', 'krung thep', 'krung thep maha nakhon', 'กรุงเทพ'],
+    'singapore': ['singapore', 'singapura'],
+    'kuala lumpur': ['kuala lumpur', 'wilayah persekutuan kuala lumpur'],
+    'new york': [
+      'new york',
+      'new york city',
+      'nyc',
+      'manhattan',
+      'brooklyn',
+      'queens',
+      'bronx',
+      'staten island',
+    ],
+  };
+
   static const _types = [
     (label: 'All', value: null),
     (label: 'Clinic', value: 'clinic'),
@@ -82,6 +125,43 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
         .where((w) => w.isNotEmpty)
         .map((w) => '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
         .join(' ');
+  }
+
+  String? _resolveSupportedCity(Placemark? mark) {
+    if (mark == null) return null;
+
+    final rawCandidates = <String?>[
+      mark.locality,
+      mark.subAdministrativeArea,
+      mark.administrativeArea,
+      mark.subLocality,
+      mark.country,
+    ];
+
+    final candidates = rawCandidates
+        .whereType<String>()
+        .map(_normalizeCity)
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    // 1) Direct exact match with supported city values.
+    for (final c in candidates) {
+      if (_cityAliases.containsKey(c)) {
+        return c;
+      }
+    }
+
+    // 2) Alias/token contains mapping (district/state -> supported city).
+    for (final c in candidates) {
+      for (final entry in _cityAliases.entries) {
+        final city = entry.key;
+        final aliases = entry.value;
+        final hit = aliases.any((a) => c.contains(a));
+        if (hit) return city;
+      }
+    }
+
+    return null;
   }
 
   void _showMessage(String text) {
@@ -135,22 +215,30 @@ class _FindHelpScreenState extends State<FindHelpScreen> {
           first?.administrativeArea ??
           '';
       final normalizedCity = _normalizeCity(rawCity);
+      final mappedCity = _resolveSupportedCity(first);
 
-      if (normalizedCity.isEmpty) {
+      if (normalizedCity.isEmpty && mappedCity == null) {
         if (!mounted) return;
         _showMessage('Could not detect city from your current location.');
         return;
       }
 
-      final pretty = _prettyCity(rawCity);
+      final resolvedCity = mappedCity ?? normalizedCity;
+      final pretty = _prettyCity(rawCity.isEmpty ? resolvedCity : rawCity);
+      final resolvedLabel = _prettyCity(resolvedCity);
       if (!mounted) return;
       setState(() {
-        _detectedCity = (label: 'Detected: $pretty', value: normalizedCity);
-        _selectedCity = normalizedCity;
+        _detectedCity = (label: 'Detected: $pretty', value: resolvedCity);
+        _selectedCity = resolvedCity;
       });
       await _load();
       if (!mounted) return;
-      _showMessage('Using current location: $pretty');
+      if (mappedCity != null && _normalizeCity(rawCity) != resolvedCity) {
+        _showMessage(
+            'Using current location: $pretty (mapped to $resolvedLabel)');
+      } else {
+        _showMessage('Using current location: $pretty');
+      }
     } catch (_) {
       if (!mounted) return;
       _showMessage(
