@@ -44,6 +44,7 @@ class Settings:
 
     a2a_url: str | None
     a2a_skill_enrichment_enabled: bool
+    a2a_api_key: str | None
 
 
 def get_settings() -> Settings:
@@ -137,6 +138,7 @@ def get_settings() -> Settings:
     a2a_skill_enrichment_enabled = os.getenv(
         "NEURODECODE_A2A_SKILL_ENRICHMENT", "0"
     ).strip() not in {"0", "false", "False"}
+    a2a_api_key = os.getenv("NEURODECODE_A2A_API_KEY", "").strip() or None
 
     return Settings(
         gemini_api_key=gemini_api_key,
@@ -170,4 +172,5 @@ def get_settings() -> Settings:
         followup_min_duration_seconds=followup_min_duration_seconds,
         a2a_url=a2a_url,
         a2a_skill_enrichment_enabled=a2a_skill_enrichment_enabled,
+        a2a_api_key=a2a_api_key,
     )

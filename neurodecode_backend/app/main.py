@@ -1552,6 +1552,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 resource_ctx = await _a2a_call_skill(
                     a2a_url=settings.a2a_url,
                     prompt=a2a_prompt,
+                    api_key=settings.a2a_api_key,
                     timeout=3.0,
                 )
                 source = "a2a"
@@ -1613,7 +1614,7 @@ async def ws_live(websocket: WebSocket) -> None:
                 return
 
             async def _fetch() -> None:
-                result = await _a2a_call_skill(a2a_url=settings.a2a_url, prompt=prompt)
+                result = await _a2a_call_skill(a2a_url=settings.a2a_url, api_key=settings.a2a_api_key, prompt=prompt)
                 if result:
                     packaged = f"[{skill_label}] {result}"
                     _pending_skill_context.append(packaged)

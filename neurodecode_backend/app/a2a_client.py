@@ -26,6 +26,7 @@ async def call_skill(
     *,
     a2a_url: str,
     prompt: str,
+    api_key: str | None = None,
     timeout: float = _DEFAULT_TIMEOUT_SECONDS,
 ) -> str | None:
     """Send a natural-language prompt to the A2A agent and return its response text.
@@ -56,11 +57,15 @@ async def call_skill(
     }
 
     try:
+        req_headers: dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            req_headers["X-API-Key"] = api_key
+
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 a2a_url,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers=req_headers,
             )
             resp.raise_for_status()
             data: dict[str, Any] = resp.json()
