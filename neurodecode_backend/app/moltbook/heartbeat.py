@@ -76,9 +76,9 @@ _POST_INTERVAL_HOURS = 4
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle
-_MAX_REPLIES_PER_CYCLE = 2
+_MAX_REPLIES_PER_CYCLE = 5
 # Max other agents' posts we'll comment on per cycle
-_MAX_EXTERNAL_COMMENTS_PER_CYCLE = 3
+_MAX_EXTERNAL_COMMENTS_PER_CYCLE = 4
 # Moltbook rule: min 20s between comments (established). We use 30s for safety.
 _COMMENT_COOLDOWN_SECONDS = 40
 # Follow a molty once we've upvoted this many of their posts
@@ -524,7 +524,7 @@ async def run_heartbeat_tick(
             continue
 
         try:
-            comments_resp = await client.get_comments(post_id, sort="new", limit=10)
+            comments_resp = await client.get_comments(post_id, sort="best", limit=20)
             comments: list[dict] = comments_resp.get("comments", [])
         except Exception as exc:
             logger.warning("[Moltbook] Failed to fetch comments for %s: %s", post_id, exc)

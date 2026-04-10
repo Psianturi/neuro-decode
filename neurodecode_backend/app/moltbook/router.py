@@ -214,6 +214,61 @@ async def moltbook_manual_post(
     }
 
 
+@router.get("/dm/inbox")
+async def moltbook_dm_inbox(
+    _: None = Depends(_require_admin),
+    client: MoltbookClient = Depends(_get_client),
+) -> dict:
+    """Return DM dashboard: pending requests + unread conversations. Admin only."""
+    check = await client.dm_check()
+    has_activity = check.get("has_activity", False)
+
+    pending: list[dict] = []
+    conversations: list[dict] = []
+
+    if has_activity:
+        pending_count = int(check.get("requests", {}).get("count", 0) or 0)
+        unread_count = int(check.get("messages", {}).get("total_unread", 0) or 0)
+
+        if pending_count:
+            reqs_resp = await client.dm_requests()
+            for req in reqs_resp.get("requests", {}).get("items", []):
+                pending.append({
+                    "conversation_id": req.get("conversation_id"),
+                    "from": req.get("from", {}).get("name"),
+                    "preview": req.get("message_preview", ""),
+                    "created_at": req.get("created_at"),
+                })
+
+        if unread_count:
+            convos_resp = await client.dm_conversations()
+            for convo in convos_resp.get("conversations", {}).get("items", []):
+                if convo.get("unread_count", 0) > 0:
+                    convo_id = convo.get("conversation_id", "")
+                    detail = await client.dm_read_conversation(convo_id)
+                    messages = detail.get("messages", [])
+                    conversations.append({
+                        "conversation_id": convo_id,
+                        "with": convo.get("other_agent", {}).get("name"),
+                        "unread_count": convo.get("unread_count"),
+                        "messages": [
+                            {
+                                "sender": m.get("sender", {}).get("name"),
+                                "content": m.get("content", ""),
+                                "created_at": m.get("created_at"),
+                            }
+                            for m in messages[-5:]  # last 5 messages for context
+                        ],
+                    })
+
+    return {
+        "status": "ok",
+        "has_activity": has_activity,
+        "pending_requests": pending,
+        "unread_conversations": conversations,
+    }
+
+
 def _build_orchestrator(settings: Settings) -> AgentOrchestrator | None:
     """Build orchestrator if Moltbook Firestore is enabled."""
     if not settings.moltbook_firestore_enabled:
