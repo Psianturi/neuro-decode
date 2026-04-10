@@ -26,6 +26,7 @@ from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
 from app.rule_debug_store import RuleDebugStore
 from app.clinical_store import ClinicalStore
+from app.a2a_client import call_skill as _a2a_call_skill
 from app.session_store import SessionStore
 from app.settings import get_settings
 
@@ -1326,6 +1327,9 @@ async def ws_live(websocket: WebSocket) -> None:
         awaiting_model_response = False
         model_turn_active = False
         suppress_text_output_for_turn = False
+        # A2A skill enrichment state — populated asynchronously, consumed on next observer note.
+        _pending_skill_context: list[str] = []
+        _active_skill_tasks: set[asyncio.Task[None]] = set()
         print("[ws_live] Session started — Gemini connected")
 
         def queue_session_event(
@@ -1400,6 +1404,29 @@ async def ws_live(websocket: WebSocket) -> None:
                 return ""
             return " | ".join(profile_memory_cues[:3])
 
+        def _consume_skill_context() -> str:
+            """Pop all pending A2A skill results and return as a single enrichment string."""
+            if not _pending_skill_context:
+                return ""
+            combined = " | ".join(_pending_skill_context)
+            _pending_skill_context.clear()
+            return combined
+
+        async def _fire_skill_enrichment(prompt: str, skill_label: str) -> None:
+            """Non-blocking: call A2A skill and store result for next observer turn."""
+            if not settings.a2a_skill_enrichment_enabled or not settings.a2a_url:
+                return
+
+            async def _fetch() -> None:
+                result = await _a2a_call_skill(a2a_url=settings.a2a_url, prompt=prompt)
+                if result:
+                    _pending_skill_context.append(f"[{skill_label}] {result}")
+                    print(f"[a2a_skill] {skill_label}: enrichment ready ({len(result)} chars)")
+
+            task: asyncio.Task[None] = asyncio.create_task(_fetch())
+            _active_skill_tasks.add(task)
+            task.add_done_callback(_active_skill_tasks.discard)
+
         async def run_audio_observer(observer_audio: bytes) -> None:
             try:
                 note = await asyncio.to_thread(ai_engine.process_audio_chunk, observer_audio, 16000)
@@ -1411,14 +1438,36 @@ async def ws_live(websocket: WebSocket) -> None:
                     observer_audio_log.append(note)
                     queue_session_event("observer_audio_trigger", source="audio_observer", text=note)
                     await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    # Enrich note with profile context so Gemini responds to THIS child --------------------------------------
+                    # Enrich note with profile context so Gemini responds to THIS child
                     profile_snippet = _build_profile_context_snippet()
                     enriched = note if not profile_snippet else f"{note} | Profile context: {profile_snippet}"
                     # Include session pattern: how many audio triggers so far this session
                     trigger_count = len(observer_audio_log)
                     if trigger_count >= 2:
                         enriched += f" | Audio trigger #{trigger_count} this session — escalation pattern possible."
+
+                    skill_ctx = _consume_skill_context()
+                    if skill_ctx:
+                        enriched += f" | Specialist guidance: {skill_ctx}"
                     await session.send_observer_note(enriched, end_of_turn=False)
+                    # Fire A2A skill for the NEXT turn (result arrives ~2-4s, injected then)
+                    if settings.a2a_skill_enrichment_enabled and settings.a2a_url:
+                        profile_ctx = _build_profile_context_snippet()
+                        if trigger_count >= 2:
+                            asyncio.create_task(_fire_skill_enrichment(
+                                f"Assess escalation risk and give immediate de-escalation steps. "
+                                f"Audio trigger #{trigger_count} this session. "
+                                f"Observer note: {note}."
+                                + (f" Child profile: {profile_ctx}." if profile_ctx else ""),
+                                "EscalationRisk",
+                            ))
+                        else:
+                            asyncio.create_task(_fire_skill_enrichment(
+                                f"Provide practical de-escalation steps for a caregiver. "
+                                f"Observation: {note}."
+                                + (f" Child profile: {profile_ctx}." if profile_ctx else ""),
+                                "DeEscalation",
+                            ))
                 else:
                     print(f"[observer_event] modality=audio bytes={len(observer_audio)} hash={_audio_hash} triggered=False")
             except asyncio.CancelledError:
@@ -1445,6 +1494,10 @@ async def ws_live(websocket: WebSocket) -> None:
                     trigger_count = len(observer_visual_log)
                     if trigger_count >= 2:
                         enriched += f" | Visual trigger #{trigger_count} this session — consider reducing visual stimuli."
+                    # Append any A2A skill context ready from a previous trigger (non-blocking)
+                    skill_ctx = _consume_skill_context()
+                    if skill_ctx:
+                        enriched += f" | Specialist guidance: {skill_ctx}"
                     await session.send_observer_note(enriched, end_of_turn=False)
             except asyncio.CancelledError:
                 raise

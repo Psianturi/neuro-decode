@@ -42,6 +42,9 @@ class Settings:
     followup_delay_hours: int
     followup_min_duration_seconds: int
 
+    a2a_url: str | None
+    a2a_skill_enrichment_enabled: bool
+
 
 def get_settings() -> Settings:
     # The Google GenAI SDK will auto-pick `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
@@ -130,6 +133,11 @@ def get_settings() -> Settings:
         60, min(int(os.getenv("NEURODECODE_FOLLOWUP_MIN_DURATION_SECONDS", "600")), 7200)
     )
 
+    a2a_url = os.getenv("NEURODECODE_A2A_URL", "").strip() or None
+    a2a_skill_enrichment_enabled = os.getenv(
+        "NEURODECODE_A2A_SKILL_ENRICHMENT", "0"
+    ).strip() not in {"0", "false", "False"}
+
     return Settings(
         gemini_api_key=gemini_api_key,
         live_model=live_model,
@@ -160,4 +168,6 @@ def get_settings() -> Settings:
         admin_secret=admin_secret,
         followup_delay_hours=followup_delay_hours,
         followup_min_duration_seconds=followup_min_duration_seconds,
+        a2a_url=a2a_url,
+        a2a_skill_enrichment_enabled=a2a_skill_enrichment_enabled,
     )
