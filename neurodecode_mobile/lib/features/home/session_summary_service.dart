@@ -18,6 +18,7 @@ class SessionSummary {
     required this.agentActions,
     required this.followUp,
     required this.safetyNote,
+    this.specialistGuidance,
     this.caregiverRating,
   });
 
@@ -33,6 +34,7 @@ class SessionSummary {
   final String agentActions;
   final String followUp;
   final String safetyNote;
+  final String? specialistGuidance;
   final int? caregiverRating;
 
   String get closeReasonLabel {
@@ -101,6 +103,10 @@ class SessionSummary {
       agentActions: pick(structured, 'agent_actions', '-'),
       followUp: pick(structured, 'follow_up', '-'),
       safetyNote: pick(structured, 'safety_note', '-'),
+      specialistGuidance: () {
+        final raw = (structured['specialist_guidance'] ?? '').toString().trim();
+        return raw.isEmpty || raw == '-' ? null : raw;
+      }(),
       caregiverRating: parseOptionalInt(json['caregiver_rating']),
     );
   }

@@ -282,6 +282,14 @@ class _SessionCardState extends State<_SessionCard> {
               label: 'Safety Note',
               text: widget.summary.safetyNote,
             ),
+            if (widget.summary.specialistGuidance != null) ...[
+              const SizedBox(height: 8),
+              _DetailRow(
+                icon: Icons.auto_awesome,
+                label: 'Specialist Guidance',
+                text: widget.summary.specialistGuidance!,
+              ),
+            ],
             const SizedBox(height: 12),
             // Star rating row
             Row(
