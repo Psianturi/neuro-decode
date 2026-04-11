@@ -242,7 +242,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
 
       if (!mounted) return;
       _setStateLabel(AgentState.idle);
-      _addLog('System', 'Connected to NeuroDecode agent.');
+      _addLog('System', 'Connected to AnakUnggul assistant.');
       _logDebug('ws_event', 'connected');
     } catch (e) {
       _setStateLabel(AgentState.error);
@@ -1153,9 +1153,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     height: 8,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _isConnected
-                          ? _getStateColor(_state)
-                          : Colors.red,
+                      color: _isConnected ? _getStateColor(_state) : Colors.red,
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -1163,9 +1161,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                     _isConnected ? _stateLabel : 'Offline',
                     style: TextStyle(
                       fontSize: 12,
-                      color: _isConnected
-                          ? _getStateColor(_state)
-                          : Colors.red,
+                      color: _isConnected ? _getStateColor(_state) : Colors.red,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1175,9 +1171,9 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                      color: secondaryColor.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(
-                            NeuroColors.radiusPill),
+                        color: secondaryColor.withValues(alpha: 0.15),
+                        borderRadius:
+                            BorderRadius.circular(NeuroColors.radiusPill),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1248,9 +1244,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                       }
 
                       final bubbleColor = isSystem
-                          ? colorScheme.surface.withValues(alpha: isDark ? 0.45 : 0.72)
+                          ? colorScheme.surface
+                              .withValues(alpha: isDark ? 0.45 : 0.72)
                           : (isUser
-                              ? primaryColor.withValues(alpha: isDark ? 0.22 : 0.12)
+                              ? primaryColor.withValues(
+                                  alpha: isDark ? 0.22 : 0.12)
                               : surfaceColor);
 
                       final bubbleBorder = Border.all(
@@ -1270,8 +1268,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                                 : Alignment.centerRight),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxWidth:
-                                MediaQuery.of(context).size.width * 0.82,
+                            maxWidth: MediaQuery.of(context).size.width * 0.82,
                           ),
                           child: IntrinsicHeight(
                             child: Row(
@@ -1281,7 +1278,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                                 if (isGemini)
                                   Container(
                                     width: 3,
-                                    margin: const EdgeInsets.symmetric(vertical: 4),
+                                    margin:
+                                        const EdgeInsets.symmetric(vertical: 4),
                                     decoration: BoxDecoration(
                                       color: primaryColor,
                                       borderRadius: BorderRadius.circular(2),
@@ -1290,60 +1288,62 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                                 if (isGemini) const SizedBox(width: 4),
                                 Flexible(
                                   child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            decoration: BoxDecoration(
-                              color: bubbleColor,
-                              borderRadius: BorderRadius.circular(
-                                  NeuroColors.radiusMd),
-                              border: bubbleBorder,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: isUser
-                                  ? CrossAxisAlignment.end
-                                  : CrossAxisAlignment.start,
-                              children: [
-                                if (!isSystem)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 4),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 10),
+                                    margin:
+                                        const EdgeInsets.symmetric(vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: bubbleColor,
+                                      borderRadius: BorderRadius.circular(
+                                          NeuroColors.radiusMd),
+                                      border: bubbleBorder,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: isUser
+                                          ? CrossAxisAlignment.end
+                                          : CrossAxisAlignment.start,
                                       children: [
-                                        if (isGemini) ...[
-                                          Icon(Icons.smart_toy,
-                                              size: 13,
-                                              color: primaryColor),
-                                          const SizedBox(width: 4),
-                                        ],
+                                        if (!isSystem)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                                bottom: 4),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (isGemini) ...[
+                                                  Icon(Icons.smart_toy,
+                                                      size: 13,
+                                                      color: primaryColor),
+                                                  const SizedBox(width: 4),
+                                                ],
+                                                Text(
+                                                  sender,
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: isGemini
+                                                        ? primaryColor
+                                                        : secondaryColor,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         Text(
-                                          sender,
+                                          trimmedText,
                                           style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                            color: isGemini
-                                                ? primaryColor
-                                                : secondaryColor,
+                                            color: isSystem
+                                                ? bodyMutedColor
+                                                : bodyPrimaryColor,
+                                            fontStyle: isSystem
+                                                ? FontStyle.italic
+                                                : FontStyle.normal,
+                                            height: 1.4,
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                Text(
-                                  trimmedText,
-                                  style: TextStyle(
-                                    color: isSystem
-                                        ? bodyMutedColor
-                                        : bodyPrimaryColor,
-                                    fontStyle: isSystem
-                                        ? FontStyle.italic
-                                        : FontStyle.normal,
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
                                 ),
                               ],
                             ),
@@ -1500,7 +1500,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                                     ? Colors.redAccent
                                     : (_state == AgentState.thinking
                                         ? Colors.purple
-                                : primaryColor))),
+                                        : primaryColor))),
                         shape: BoxShape.circle,
                         boxShadow: _isMicActive
                             ? [
@@ -1555,36 +1555,36 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                       height: 48,
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                      onPressed: _state == AgentState.connecting
-                          ? null
-                          : (_isConnected
-                              ? () async => _disconnect()
-                              : _connect),
-                      icon: Icon(
-                        _isConnected
-                            ? Icons.stop_circle_outlined
-                            : (_state == AgentState.connecting
-                                ? Icons.sync
-                                : Icons.play_circle_outline),
-                      ),
-                      label: Text(
-                        _isConnected
-                            ? 'End Session'
-                            : (_state == AgentState.connecting
-                                ? 'Connecting...'
-                                : 'Reconnect'),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isConnected
-                            ? Colors.red.shade400
-                            : primaryColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(NeuroColors.radiusLg),
+                        onPressed: _state == AgentState.connecting
+                            ? null
+                            : (_isConnected
+                                ? () async => _disconnect()
+                                : _connect),
+                        icon: Icon(
+                          _isConnected
+                              ? Icons.stop_circle_outlined
+                              : (_state == AgentState.connecting
+                                  ? Icons.sync
+                                  : Icons.play_circle_outline),
+                        ),
+                        label: Text(
+                          _isConnected
+                              ? 'End Session'
+                              : (_state == AgentState.connecting
+                                  ? 'Connecting...'
+                                  : 'Reconnect'),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              _isConnected ? Colors.red.shade400 : primaryColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(NeuroColors.radiusLg),
+                          ),
                         ),
                       ),
                     ),
-                  ),
                   ),
                 ],
               ),

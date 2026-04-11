@@ -31,7 +31,8 @@ class HomeDashboardScreen extends StatefulWidget {
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final SessionSummaryService _summaryService = SessionSummaryService();
   final NotificationService _notificationService = NotificationService();
-  final PushRegistrationService _pushRegistrationService = PushRegistrationService();
+  final PushRegistrationService _pushRegistrationService =
+      PushRegistrationService();
   final AppIdentityStore _identityStore = AppIdentityStore();
   final ProfileMemoryService _profileService = ProfileMemoryService();
   SessionSummary? _latestSummary;
@@ -255,7 +256,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NeuroDecode AI'),
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.asset(
+                'assets/AnakUnggul-logo.png',
+                width: 34,
+                height: 34,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(width: NeuroColors.spacingSm),
+            const Text('AnakUnggul'),
+          ],
+        ),
         actions: [
           IconButton(
             onPressed: _openNotificationsCenter,
@@ -311,6 +326,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: NeuroColors.spacingMd),
+              const _BrandHeaderCard(),
               const SizedBox(height: NeuroColors.spacingMd),
               const _MascotCarousel(),
               const SizedBox(height: NeuroColors.spacingLg),
@@ -481,6 +498,55 @@ class _LatestSessionCard extends StatelessWidget {
   }
 }
 
+class _BrandHeaderCard extends StatelessWidget {
+  const _BrandHeaderCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+    final titleStyle = Theme.of(context).textTheme.headlineSmall;
+    final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: NeuroColors.textSecondary,
+        );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(NeuroColors.spacingMd),
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Image.asset(
+              'assets/AnakUnggul-logo.png',
+              width: 96,
+              height: 96,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const SizedBox(width: NeuroColors.spacingMd),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('AnakUnggul', style: titleStyle),
+                const SizedBox(height: 6),
+                Text(
+                  'Real-time caregiver support for calm, guided responses during difficult sensory moments.',
+                  style: bodyStyle,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ProfileSummaryCard extends StatelessWidget {
   const _ProfileSummaryCard({
     required this.profileId,
@@ -601,7 +667,8 @@ class _ProfileChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chipColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.10);
+    final chipColor =
+        Theme.of(context).colorScheme.primary.withValues(alpha: 0.10);
     final chipTextColor = Theme.of(context).textTheme.titleSmall?.color ??
         Theme.of(context).colorScheme.onSurface;
 
@@ -758,7 +825,8 @@ class _MascotCarouselState extends State<_MascotCarousel> {
   @override
   Widget build(BuildContext context) {
     final surfaceColor = Theme.of(context).colorScheme.surface;
-    final inactiveDotColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.18);
+    final inactiveDotColor =
+        Theme.of(context).colorScheme.primary.withValues(alpha: 0.18);
 
     return Column(
       children: [
@@ -818,8 +886,7 @@ class _MascotCarouselState extends State<_MascotCarousel> {
                 ),
               ),
               Padding(
-                padding:
-                    const EdgeInsets.only(bottom: NeuroColors.spacingMd),
+                padding: const EdgeInsets.only(bottom: NeuroColors.spacingMd),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(
@@ -831,8 +898,8 @@ class _MascotCarouselState extends State<_MascotCarousel> {
                       height: 8,
                       decoration: BoxDecoration(
                         color: _currentPage == index
-                          ? Theme.of(context).colorScheme.primary
-                          : inactiveDotColor,
+                            ? Theme.of(context).colorScheme.primary
+                            : inactiveDotColor,
                         borderRadius:
                             BorderRadius.circular(NeuroColors.radiusPill),
                       ),

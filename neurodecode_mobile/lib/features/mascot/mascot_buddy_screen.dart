@@ -187,7 +187,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
         return 'Privacy & Safety';
       case 'overview':
       default:
-        return 'What is NeuroDecode?';
+        return 'What is AnakUnggul?';
     }
   }
 
@@ -196,7 +196,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
       case 'breathe':
         return 'Try this together: inhale for 4, hold for 4, exhale slowly for 6. Repeat three times. Keep your voice soft and your steps simple.';
       case 'privacy':
-        return 'Camera and microphone are used only during Live Support to help generate calm, real-time guidance. NeuroDecode is a support tool, not a medical diagnosis tool.';
+        return 'Camera and microphone are used only during Live Support to help generate calm, real-time guidance. AnakUnggul is a support tool, not a medical diagnosis tool.';
       case 'overview':
       default:
         return 'I am your real-time support companion. When a sensory overload or crisis begins, open the Support tab, turn on camera and microphone, and place the phone nearby. I will listen, observe, and offer short calming guidance to help you and your child through the moment.';

@@ -1,590 +1,417 @@
-# NeuroDecode AI
+# NeuroDecode
 
-NeuroDecode AI is a real-time multimodal caregiving copilot for high-stress sensory moments.
+NeuroDecode is the platform and system architecture behind AnakUnggul, a multimodal ASD caregiver support experience built around three cooperating services:
 
-It is designed for caregivers who need immediate support without typing. The app can listen, optionally observe with camera context, and respond with calm, actionable guidance in the same session.
+1. Family Assistant, the main live session orchestrator.
+2. Moltbook Agent, the community insight harvester.
+3. A2A Agent, the specialist reasoning and resource agent.
 
----
+The goal is simple: when a caregiver faces a stressful sensory moment, the system should listen, observe, remember useful context, and answer with calm, practical guidance without making the caregiver do extra work.
 
-## Roadmap
+For product naming, the clearest split is:
 
-Full build history from initial prototype to current state, plus planned next steps.
+1. AnakUnggul for the public-facing app and user experience.
+2. NeuroDecode for the technical platform and repository.
+3. Family Assistant for the live orchestration agent inside the platform.
 
----
+## What NeuroDecode Does
 
-### Phase 0 — MVP ✅ Delivered
+NeuroDecode combines:
 
+1. A Flutter mobile app for live support.
+2. A FastAPI backend for orchestration.
+3. Gemini Live for real-time conversation.
+4. Firestore for memory and session data.
+5. Keras observer models for audio and visual signals.
+6. A community insight pipeline through Moltbook.
+7. An A2A service for specialist tools and ASD resource lookup.
 
-- Real-time caregiver co-pilot over WebSocket (`/ws/live`).
-- Gemini Live API integration: push-to-talk → AI audio response streamed back.
-- Audio Observer: custom Keras ML model trained on ASD behavioral audio cues, runs as a background heuristic signal.
-- Visual Observer: camera frames analyzed in parallel for behavioral context.
-- ASD caregiver system prompt engineering (non-diagnostic, non-judgmental, bilingual EN/ID).
-- Deployed to Cloud Run (asia-southeast1).
 
----
-
-### Phase 1 — Production Hardening & Session History ✅ Delivered
-
-*Stability and persistence layer so real caregivers can use it beyond a demo.*
-
-- Firestore session persistence (`sessions/` + `events/` collections).
-- Post-session AI summary: title, triggers, agent actions, follow-up, safety note — generated via Gemini after session close.
-- Fixed critical WebSocket stability bug (`asyncio.wait(FIRST_COMPLETED)` caused early session close after the first Gemini turn).
-- Native Android PCM audio path: stable 24kHz playback with no crackling or latency buildup.
-- Cloud Build CI/CD pipeline (`cloudbuild.yaml`) for automatic deployment on push to `dev`.
-- History & Insights screen in Flutter: timeline of past sessions with structured summaries.
-
----
-
-### Phase 2 — Proactive Push Notifications ✅ Delivered
-
-*The app reaches out to caregivers — they don't have to remember to open it.*
-
-- Rule-based proactive engine: analyses post-session data and fires FCM push notifications (e.g. safety follow-ups, check-ins).
-- Firebase Cloud Messaging (FCM) → Android push delivery.
-- `notifications/` Firestore collection: full notification history with read/unread state.
-- Notifications Center screen in Flutter with unread badge.
-- Push device token registration and deactivation (`/devices/push-token`).
-- Telegram admin alert channel for monitoring session events.
-
----
-
-### Phase 2.5 — In-App Follow-Up Response Flow ⏸ Deferred
-
-*Caregivers respond to AI follow-ups directly inside the notification — not just reading them.*
-
-- In-app notification tray with reply input (e.g. "How is your child now?").
-- Follow-up response routing back to backend for AI processing.
-- **Status:** FCM banners are delivered and visible. The in-app reply flow is deferred until post-hackathon announcement period.
-
----
-
-### Phase 3A — Community Intelligence via Moltbook ✅ Delivered
-
-*Harvest real caregiver community insights and inject them as context during live sessions.*
-
-- Moltbook social API integration: `neurodecode-moltbook` agent (separate Cloud Run service) monitors Anak Unggul community posts.
-- Incoming comments are parsed by `extract_community_insight()` → saved to `community_insights/` Firestore collection.
-- `RelevanceFilterAgent`: single Gemini call (temperature 0.0) scores which community insights are relevant per active session profile.
-- Relevant insights injected into session context alongside profile memory.
-- Lives on branch `feature/moltbook-integration` wrapping the main backend.
-
----
-
-### Phase 3B — Profile Memory & Personalization ✅ Delivered
-
-*Agent remembers each child's specific triggers and what actually helps them.*
-
-- Profile Workspace screen in Flutter: caregiver sets structured support preferences (known triggers, effective interventions, communication style, sensory profile).
-- `profile_memory/` Firestore collection.
-- At session start, backend retrieves profile memory context and injects it into the Gemini system prompt — Buddy responds with child-specific strategies, not generic ASD advice.
-- Memory saving from History/Insights: AI surfaces suggested memory actions ("Save this trigger?") that caregivers can approve with one tap.
-- Feature-flagged via `NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT`.
-
----
-
-### Phase 4 — Clinical Routing / Find Help ✅ Delivered
-
-*"Bridging the gap between digital assistance and real-world care — connect caregivers with specialized ASD clinics, occupational therapists, or emergency telemedicine services."*
-
-- Google Places API (New) harvest pipeline now supports multi-city and multi-country runs into Firestore `clinical_resources/`.
-- Current active curated coverage: 779+ ASD resources across 10 cities (Jakarta, Bandung, Surabaya, Medan, Yogyakarta, Makassar, Bangkok, Singapore, Kuala Lumpur, New York).
-- 3 Firestore composite indexes for efficient filtering: `city+is_active`, `resource_type+is_active`, `city+resource_type+is_active`.
-- REST API: `GET /clinical-resources` (filters: city, resource_type, active_only), `GET /clinical-resources/{id}`.
-- Admin write API: `POST` / `PATCH /admin/clinical-resources` guarded by `X-Admin-Secret`.
-- Flutter **Find Help** tab (4th bottom-nav item): city selector + resource cards with type badge, address, tap-to-copy phone, staleness warning, and filter chips (All / Clinic / Therapist / School / Hospital / Community).
-
----
-
-### Phase 5 — Time-Delayed Proactive Pipelines ✅ Delivered
-
-*"Utilizing Cloud Scheduler to send gentle check-in notifications hours after a severe meltdown to monitor the child's recovery."*
-
-- `followup_engine.py`: scans Firestore for sessions with `followup_scheduled_at` set (high-severity or safety-flagged) and fires FCM follow-up push when the delay window passes.
-- Cloud Scheduler job (`*/15 * * * *`) calls the backend `/admin/followup/process` endpoint every 15 minutes — no Cloud Tasks dependency.
-- FCM delivery confirmed: session `212db6fe` received follow-up push.
-- Telegram delivery confirmed: admin alert channel received the follow-up notification in real time.
-- `followup_sent` Firestore flag prevents duplicate delivery on subsequent scheduler ticks.
-- Two composite Firestore indexes support the followup scan: `followup_sent + followup_scheduled_at`.
-
----
-
-### Phase 5.5 — In-App Follow-Up Reply Flow ⏸ Deferred
-
-*Caregivers respond to AI follow-ups directly inside the notification — not just reading them.*
-
-- In-app notification tray with reply input ("How is your child now?").
-- Follow-up response routing back to backend for AI processing.
-- **Status:** FCM banners delivered. In-app reply flow deferred post-hackathon.
-
----
-
-### Phase 6 — Post-Session Feedback Rating ✅ Delivered
-
-*Short caregiver feedback loop — did this session actually help?*
-
-- 1–5 star tappable rating shown in each session card inside the History / Insights screen.
-- `PATCH /sessions/{session_id}/rate` endpoint writes `caregiver_rating` to the `sessions/` Firestore document.
-- Optimistic UI update in Flutter — star selection locks immediately while the request completes in the background.
-- Used downstream to weight intervention effectiveness in profile memory suggestions.
-
----
-
-### Phase 7 — A2A Agent Protocol ✅ Delivered
-
-*Expose NeuroDecode's caregiver tools as a standards-compliant A2A (Agent-to-Agent) service so any AI platform or orchestrator can invoke them.*
-
-- `neurodecode_a2a` microservice: Google ADK `Agent` wrapping 7 callable tools, deployed as a separate Cloud Run service.
-- `find_asd_resources` — Jakarta uses curated Firestore database (198 resources); all other cities hit live Google Search + Gemini for real-time results worldwide.
-- `suggest_interventions` — evidence-based strategies for a given ASD trigger (e.g. "loud noise sensitivity").
-- `get_de_escalation_steps` — step-by-step active-distress protocol for caregivers.
-- `assess_escalation_risk` — structured risk assessment from a behavioral pattern description.
-- `draft_therapist_handover` — structured clinician-ready handover note from caregiver observations.
-- `assess_caregiver_wellbeing` — caregiver stress/burnout screening with practical support guidance.
-- `get_sensory_diet_plan` — personalized OT-style sensory regulation plan by age/profile/context.
-- A2A agent card at `/.well-known/agent-card.json` (protocolVersion 0.2.2, preferredTransport JSONRPC).
-- 3-layer cost control: in-memory cache → Firestore 24h TTL cache → 20 req/hr rate limit per location.
-- Optional API key auth via `ApiKeyMiddleware` (`A2A_REQUIRE_AUTH` env flag).
-- Dedicated Cloud Build pipeline (`cloudbuild_a2a.yaml`) — separate from main backend deployments.
-- **Published on Prompt Opinion Marketplace**: [AnakUnggul - ASD Caregiver Agent](https://app.promptopinion.ai/marketplace/agent/019d5ea9-5b99-7cc2-9e66-387e21cef16a)
-- Agent card live at `https://neurodecode-a2a-jzfv6ygw3q-as.a.run.app/.well-known/agent-card.json`
-
----
-
-### Phase 8 — Knowledge Harvest Agent 🔲 Planned
-
-*Ground Buddy's guidance in current ASD science, not just community posts.*
-
-- PubMed RSS + Autism Speaks RSS → `knowledge_base/` Firestore collection.
-- Gemini call to extract structured intervention evidence per article.
-- Injected alongside community insights as a third context tier during live sessions.
-
----
-
-### Phase 9 — Longitudinal Analytics Dashboard 🔲 Planned
-
-*"Exporting Firestore session data to BigQuery to help caregivers and therapists visualize trigger trends and intervention success rates over months."*
-
-- BigQuery export pipeline for session and event data.
-- Caregiver dashboard: trigger frequency charts, intervention success rates, session duration trends over months.
-- Therapist/clinician sharing view (read-only link).
-- Optional: session export to PDF for clinical appointments.
-
----
-
-## Product Snapshot (Current)
-
-Current implemented user flow:
-
-1. Choose `Audio only` or `Video + audio` in the Support tab.
-2. Select or enter a `Profile ID`.
-3. Start live session and speak with push-to-talk.
-4. Receive Gemini guidance (audio + transcript).
-5. Review post-session summary in History / Insights.
-6. Save suggested memories (trigger/follow-up) to profile memory.
-7. Receive proactive follow-up push notification hours after a high-severity session.
-8. Browse ASD clinics, therapists, and schools by city in the **Find Help** tab.
-
-Major capabilities running in production:
-
-1. Multi-turn live session over WebSocket (`/ws/live`).
-2. Native Android PCM playback path for stable 24kHz output.
-3. Profile Workspace with structured support preferences.
-4. Retrieval-based profile memory context for live session personalization.
-5. Firestore-backed session history with fallback memory store.
-6. Suggested memory actions from History / Insights.
-7. Rule-based proactive push notifications after session close (FCM).
-8. Time-delayed follow-up push notifications via Cloud Scheduler (every 15 min scan, FCM delivery confirmed).
-9. Clinical resource directory: 779+ ASD resources across 10 cities with REST API and city-aware Flutter UI.
-
-## Why It Matters
-
-During sensory escalation, caregivers usually cannot stop and type long prompts.
-
-NeuroDecode reduces caregiver cognitive load with a live loop:
-
-1. Hear context (mic stream).
-2. Optionally see context (camera observer mode).
-3. Respond instantly with practical support steps.
-
-## Architecture (High-Level)
+## High-Level Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Mobile["Flutter Mobile — Android"]
-        F_UI[Live Support / History / Find Help / Buddy]
-        F_PCM[Native PCM AudioTrack 24kHz]
-    end
+    User[Caregiver using Flutter app] --> App[Flutter Mobile App]
 
-    subgraph Backend["FastAPI Backend — Cloud Run asia-southeast1"]
-        B_WS[WebSocket /ws/live]
-        B_HTTP[HTTP REST API]
-        B_AUDIO[Audio Observer CNN]
-        B_VIS[Visual Observer VGG16]
-        B_PROFILE[profile_store / memory_context]
-        B_RELEVANCE[RelevanceFilterAgent]
-        B_RULES[Notification Engine]
-        B_FOLLOW[followup_engine]
-        B_CLINICAL[clinical_store — 779+ resources, 10 cities]
-    end
+    App -->|wss /ws/live| FA[Family Assistant on Cloud Run]
+    App -->|REST| FA
 
-    subgraph A2AService["NeuroDecode A2A Agent — Cloud Run"]
-        A_AGENT[ADK Agent: neurodecode_asd_agent]
-        A_T1[find_asd_resources]
-        A_T2[suggest_interventions]
-        A_T3[get_de_escalation_steps]
-        A_T4[assess_escalation_risk]
-        A_T5[draft_therapist_handover]
-        A_T6[assess_caregiver_wellbeing]
-        A_T7[get_sensory_diet_plan]
-    end
+    FA --> Gemini[Gemini Live API]
+    FA <--> Firestore[(Firestore)]
+    FA --> Observer[Audio and Visual Observer Models]
+    FA --> A2A[A2A Agent on Cloud Run]
 
-    subgraph Moltbook["neurodecode-moltbook — Cloud Run"]
-        M_HEART[Heartbeat loop]
-        M_EXTRACT[extract_community_insight]
-        M_PERSONA[Persona pool 5 agents]
-    end
+    Moltbook[Moltbook Agent on Cloud Run] --> Firestore
+    PromptOpinion[Prompt Opinion or other external agent clients] --> A2A
 
-    subgraph Firestore["Firestore Collections"]
-        FS_S[sessions + events]
-        FS_P[profile_memory]
-        FS_CI[community_insights]
-        FS_N[notifications]
-        FS_CR[clinical_resources — 779+ across 10 cities]
-    end
-
-    Gemini([Gemini Live API])
-    FCM([Firebase FCM])
-    GCS([Cloud Scheduler every 15 min])
-    CB([Cloud Build CI/CD])
-    Telegram([Telegram Admin Channel])
-    SearchAPI([Google Search + Gemini])
-    MoltAPI([Moltbook API])
-
-    Mobile -->|wss /ws/live| B_WS
-    Mobile -->|HTTP GET/PATCH| B_HTTP
-    B_WS --> Gemini
-    Gemini -->|audio + transcript| F_PCM
-    B_WS --> B_AUDIO
-    B_WS --> B_VIS
-    B_AUDIO -->|heuristic signal| Gemini
-    B_VIS -->|heuristic signal| Gemini
-    B_WS --> B_PROFILE
-    B_WS --> B_RELEVANCE
-    B_PROFILE <--> FS_P
-    B_RELEVANCE --> FS_CI
-    B_RELEVANCE -->|insights injected| Gemini
-    B_WS --> B_RULES
-    B_RULES --> FCM
-    FCM -->|push notification| Mobile
-    GCS -->|POST /admin/followup| B_FOLLOW
-    B_FOLLOW --> FS_S
-    B_FOLLOW --> FCM
-    B_FOLLOW --> Telegram
-    B_HTTP --> B_CLINICAL
-    B_CLINICAL <--> FS_CR
-    Backend --> FS_S
-    Backend --> FS_N
-    M_HEART <-->|monitor posts| MoltAPI
-    M_EXTRACT --> FS_CI
-    M_PERSONA -->|reply as persona| MoltAPI
-    A_AGENT --> A_T1
-    A_AGENT --> A_T2
-    A_AGENT --> A_T3
-    A_AGENT --> A_T4
-    A_AGENT --> A_T5
-    A_AGENT --> A_T6
-    A_AGENT --> A_T7
-    A_T1 -->|jakarta curated| FS_CR
-    A_T1 -->|other cities live| SearchAPI
-    CB -->|dev branch auto deploy| Backend
-    CB -->|a2a branch auto deploy| A2AService
+    Observer --> FA
+    A2A --> FA
 ```
+
+## Three Main Services
+
+### 1. Family Assistant
+
+Family Assistant is the main brain of the product flow. It is the service that owns the live caregiver session.
+
+Its responsibilities are:
+
+1. Receive audio, text, and optional camera input from the Flutter app.
+2. Load profile facts, curated memory, and recent session patterns.
+3. Inject safe, relevant context into Gemini.
+4. Run observer models in the background.
+5. Ask the A2A Agent for specialist help when needed.
+6. Save session summaries, events, and notifications to Firestore.
+
+In practice, Family Assistant is not just chat. It is the orchestrator that coordinates memory, observers, Gemini, storage, and external enrichment.
+
+#### Family Assistant Flow
+
+```mermaid
+flowchart TD
+    A[Flutter opens live session] --> B[Family Assistant accepts WebSocket]
+    B --> C[Load profile and recent memory from Firestore]
+    C --> D[Build private session context]
+    D --> E[Start Gemini Live session]
+    E --> F[Receive caregiver audio text and optional camera frames]
+    F --> G[Run observer models in parallel]
+    F --> H[Call A2A when specialist enrichment is needed]
+    G --> I[Inject observer notes into Gemini context]
+    H --> I
+    I --> J[Gemini returns voice and transcript response]
+    J --> K[Flutter plays audio and shows transcript]
+    K --> L[Session ends]
+    L --> M[Generate summary and save data to Firestore]
+```
+
+#### Family Assistant Input
+
+Family Assistant receives:
+
+1. Audio chunks from the microphone.
+2. Optional camera frames.
+3. Text messages.
+4. `user_id` and optional `profile_id`.
+
+#### Family Assistant Output
+
+Family Assistant returns:
+
+1. Spoken Gemini responses.
+2. Input and output transcripts.
+3. Observer notes.
+4. Profile-memory status for the current session.
+5. Post-session summary and follow-up data saved to Firestore.
+
+#### Private Memory in Family Assistant
+
+Private memory is internal context prepared by the backend for Gemini. It is called private because it is not meant to be quoted directly back to the caregiver.
+
+It can include:
+
+1. Profile facts.
+2. Curated memory items.
+3. Patterns from recent sessions.
+4. Filtered community insights.
+
+This is not the same as anonymous data. It is internal session context and must still be treated as sensitive profile data.
+
+### 2. Moltbook Agent
+
+Moltbook Agent is not the live session agent. It works upstream.
+
+Its job is to observe public ASD caregiver discussions, extract reusable insight, and store only anonymized insight text for later use.
+
+Think of Moltbook as a community-learning pipeline, not a direct chat assistant for the caregiver session.
+
+#### Moltbook Flow
+
+```mermaid
+flowchart TD
+    A[Monitor Moltbook community activity] --> B[Read new comments and discussions]
+    B --> C[Extract reusable ASD caregiving insight]
+    C --> D[Remove direct personal identity]
+    D --> E[Save insight to community_insights in Firestore]
+    E --> F[Family Assistant loads recent insights]
+    F --> G[Relevance filter keeps only safe relevant non-contradictory items]
+    G --> H[Selected insights become part of private session context]
+```
+
+#### What Moltbook Stores
+
+The shared Firestore layer stores anonymized community insight, not caregiver profile data from a live session.
+
+Examples of what belongs here:
+
+1. A calming strategy that often helps in noisy places.
+2. A practical tip from educators for sensory overload.
+3. A community suggestion about managing transitions.
+
+Examples of what should not be stored here:
+
+1. Private caregiver identity.
+2. Profile-specific personal notes from a child session.
+3. Raw conversation dumps from Family Assistant.
+
+#### Why Moltbook Matters
+
+Moltbook gives NeuroDecode a second knowledge layer beyond profile memory.
+
+Without it, Family Assistant only knows:
+
+1. the current child profile,
+2. recent sessions,
+3. generic model knowledge.
+
+With Moltbook, Family Assistant also gains community-derived insight, as long as it is filtered so it does not contradict the child profile.
+
+### 3. A2A Agent
+
+A2A Agent is a separate specialist service. It is not the main session owner and it is not the main database.
+
+Its role is to answer focused specialist requests such as:
+
+1. ASD resource lookup.
+2. De-escalation guidance.
+3. Escalation risk assessment.
+4. Sensory strategy suggestions.
+5. Caregiver wellbeing support.
+6. Therapist handover drafting.
+
+#### A2A Flow
+
+```mermaid
+flowchart TD
+    A[Family Assistant detects a specialist need] --> B[Build short focused prompt]
+    B --> C[Send request to A2A Agent]
+    C --> D[A2A selects the right tool]
+    D --> E[Return concise specialist result]
+    E --> F[Family Assistant injects result into live context]
+    F --> G[Gemini answers caregiver with richer guidance]
+```
+
+#### Important A2A Design Notes
+
+1. A2A communicates directly with Family Assistant over HTTP.
+2. A2A is fail-open, so if it is slow or unavailable, the live session still continues.
+3. A2A is not the persistent memory store for live sessions.
+4. A2A can enrich the current session context, but that does not automatically become long-term memory.
+5. A2A is also exposed as a separate agent for external ecosystems such as Prompt Opinion.
+
+## How The Three Services Work Together
+
+In one sentence:
+
+1. Family Assistant runs the session.
+2. Moltbook contributes community knowledge.
+3. A2A contributes specialist reasoning and resource lookup.
+
+The collaboration looks like this:
+
+1. Flutter starts a live session with Family Assistant.
+2. Family Assistant loads profile memory and recent session patterns from Firestore.
+3. Family Assistant optionally adds filtered Moltbook insights.
+4. Observer models watch audio and vision signals.
+5. If needed, Family Assistant asks A2A for specialist help.
+6. Gemini responds using all of that context.
+7. After the session, Family Assistant saves the result back to Firestore.
+
+## Observer Models and Thresholds
+
+The observer models are background sensors, not final decision makers.
+
+They produce signals from:
+
+1. audio patterns,
+2. visual patterns.
+
+Those signals only become observer notes when they pass a threshold.
+
+A threshold is simply the decision boundary that says:
+
+1. below this score, do nothing,
+2. above this score, inject an internal observer note.
+
+This helps the live session stay practical. The model should not interrupt Gemini for every weak signal, but it also should not miss strong signals that may indicate distress or overload.
+
+## Data, Notebook, and Keras Models
+
+The project keeps the training and adaptation workflow visible in the repository.
+
+### Training Notebook
+
+1. Notebook: `Asd_Agent_Training.ipynb`
+2. Purpose: prepare and adapt audio and video pipelines used for observer features.
+
+### Model Files Used in Backend
+
+1. `neurodecode_backend/app/models/autism_audio_extractor.keras`
+2. `neurodecode_backend/app/models/autism_behavior_extractor.keras`
+
+These models are used as observer feature extractors during live sessions. They support context enrichment and are not positioned as clinical diagnostic models.
+
+### Source Repositories Referenced in the Notebook
+
+The notebook uses public GitHub sources from AutismBrainBehavior to help shape the project pipeline:
+
+1. https://github.com/AutismBrainBehavior/Video-Neural-Network-ASD-screening
+2. https://github.com/AutismBrainBehavior/Audio-Neural-Network-ASD-screening
+
+These repositories are used to help the notebook workflow and code adaptation in this project.
+
+### Dataset References Used in the Notebook Workflow
+
+The notebook references:
+
+1. video data under `data_video_skeleton/training_set` , `data_video_skeleton/testing_set`
+2. ASD audio data under `data_audio_noise/ASD_Audio`
+3. environmental noise audio under `data_audio_noise/UrbanSound8K/audio`
+4. UrbanSound8K as the noise audio source used in the workflow
+
+## Main Features
+
+Current implemented capabilities include:
+
+1. Live caregiver support over WebSocket with voice response.
+2. Optional audio plus camera session mode.
+3. Firestore-backed session history and summaries.
+4. Profile memory and child-specific personalization.
+5. Community insight injection through Moltbook.
+6. A2A specialist tools and Prompt Opinion interoperability.
+7. ASD clinical resource lookup.
+8. Push notifications and follow-up reminders.
+9. Flutter screens for Support, Home, Find Help, and Buddy profile workspace.
+
+## Technology Stack
+
+### Application Layer
+
+1. Flutter mobile app.
+2. FastAPI backend.
+3. Separate FastAPI-based A2A service.
+
+### AI Layer
+
+1. Gemini Live API for real-time conversation.
+2. Gemini text models for filtering and summary generation.
+3. TensorFlow and Keras for observer models.
+
+### Data and Infrastructure
+
+1. Firestore for profiles, memory, sessions, notifications, and shared community insights.
+2. Cloud Run for backend and A2A deployment.
+3. Cloud Build for deployment pipelines.
+4. Firebase Cloud Messaging for mobile notifications.
+
+## Technical Documentation
+
+The main README stays intentionally high-level.
+
+For implementation details, use the component READMEs:
+
+1. Backend technical details: `neurodecode_backend/README.md`
+2. Mobile and Flutter technical details: `neurodecode_mobile/README.md`
+3. A2A service details: the `neurodecode_a2a` service folder and source files
+
+## Cloud and Firestore Overview
+
+NeuroDecode is designed so that the mobile app stays thin and the main logic stays on the cloud.
+
+### Cloud Run
+
+Cloud Run hosts:
+
+1. the main Family Assistant backend,
+2. the A2A Agent service,
+3. supporting deployed services such as the Moltbook pipeline when enabled.
+
+### Firestore
+
+Firestore is the long-term data layer for:
+
+1. profiles,
+2. profile memory,
+3. sessions,
+4. session events,
+5. notifications,
+6. clinical resources,
+7. community insights.
+
+### Relationship with Flutter
+
+The Flutter app does not run orchestration logic locally.
+
+Instead:
+
+1. Flutter sends live input to Family Assistant on Cloud Run.
+2. Family Assistant talks to Gemini, Firestore, observer models, and A2A.
+3. Flutter receives only the session outputs it needs to present to the caregiver.
 
 ## Repository Structure
 
 ```text
 NeuroDecode/
 |- README.md
-|- cloudbuild.yaml           ← main backend CI/CD
-|- cloudbuild_a2a.yaml       ← A2A agent CI/CD
-
+|- Asd_Agent_Training.ipynb
+|- cloudbuild.yaml
+|- cloudbuild_a2a.yaml
+|- firestore.indexes.json
 |- neurodecode_backend/
-|  |- README.md
-|  |- requirements.txt
-|  |- scripts/
-|  |  |- ws_smoke_test.py
-|  |  |- memory_eval_probe.py
-|  |  |- harvest_clinical_places.py
-|  |  |- seed_clinical_resources.py
 |  |- app/
 |  |  |- main.py
-|  |  |- settings.py
-|  |  |- gemini_live.py
 |  |  |- ai_processor.py
-|  |  |- clinical_store.py
+|  |  |- memory_context.py
+|  |  |- relevance_filter.py
 |  |  |- community_store.py
-|  |  |- push_sender.py
-|  |  |- push_device_store.py
+|  |  |- profile_store.py
+|  |  |- session_store.py
 |  |  |- notification_store.py
-|  |  |- rule_debug_store.py
 |  |  |- models/
-|- neurodecode_a2a/           ← Phase 7 A2A Agent service
-|  |- agent.py               ← ADK Agent definition (7 tools)
-|  |- app.py                 ← FastAPI server + agent card
-|  |- middleware.py          ← ApiKeyMiddleware
-|  |- requirements.txt
+|  |- scripts/
+|- neurodecode_a2a/
+|  |- app.py
+|  |- agent.py
 |  |- tools/
-|  |  |- clinical.py         ← find_asd_resources (multi-city curated + global)
-|  |  |- asd_reasoning.py    ← suggest_interventions, de-escalation, risk
-|  |  |- caregiver_support.py← handover, wellbeing, sensory diet
 |- neurodecode_mobile/
-   |- README.md
-   |- pubspec.yaml
-   |- lib/
-      |- features/support/
-      |- features/live_agent/
-      |- features/home/
-      |- features/profile/
-      |- features/clinical/        ← Find Help screen
-      |- features/shell/
-   |- android/
-      |- app/build.gradle
-      |- settings.gradle
+|  |- lib/
+|  |  |- features/
+|  |  |- config/
 ```
 
-## Quick Start
+## Run The Project
 
-### Backend (FastAPI)
+For local setup, use the component-specific guides:
 
-Requirements:
+1. Backend setup and Cloud Run notes: `neurodecode_backend/README.md`
+2. Flutter app setup and Firebase notes: `neurodecode_mobile/README.md`
+3. A2A local setup: `neurodecode_a2a` service folder
 
-1. Python 3.10+
-2. Gemini API key
-3. Optional Firestore credentials for local run
+## Current Feature Summary
 
-```powershell
-cd c:\PROJ\NeuroDecode\neurodecode_backend
-python -m venv .venv
-.\.venv\Scripts\python -m pip install --upgrade pip
-.\.venv\Scripts\pip install -r requirements.txt
+NeuroDecode currently focuses on five practical outcomes:
 
-$env:GEMINI_API_KEY = "YOUR_KEY_HERE"
-$env:NEURODECODE_SUMMARY_ENABLED = "1"
-$env:NEURODECODE_SUMMARY_MODEL = "gemini-2.5-flash-lite"
-$env:NEURODECODE_FIRESTORE_ENABLED = "1"
-$env:NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT = "1"
+1. support the caregiver in the moment,
+2. remember what helps a specific child,
+3. reuse safe community insight,
+4. connect caregivers to relevant ASD resources,
+5. keep improving through session summaries and follow-up loops.
 
-.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+## Long-Term Direction
 
-Health check:
+The long-term direction for NeuroDecode and AnakUnggul includes:
 
-```powershell
-curl.exe -s http://127.0.0.1:8000/health
-```
+1. FHIR interoperability integration so longitudinal data and AI-generated therapist handover notes can integrate securely with hospital EHR systems.
+2. Context-aware clinical routing using healthcare directory APIs to guide caregivers to the nearest relevant ASD clinics based on session severity.
+3. Longitudinal analytics dashboards by exporting Firestore data to BigQuery so therapists can track triggers, interventions, and progress over time.
+4. Data anonymization research to strip PII so the real-world caregiving dataset can support ASD academic research safely.
+5. Richer specialist skills in A2A, including more AI-agent perspectives beyond human community insight.
+6. More robust knowledge harvesting from scientific and professional sources.
+7. Clearer explainability in how memory, observers, and enrichment affect responses.
 
-### Mobile (Flutter)
+## Notes
 
-```powershell
-cd c:\PROJ\NeuroDecode\neurodecode_mobile
-flutter pub get
-flutter run
-```
-
-Set backend host in:
-
-1. `neurodecode_mobile/lib/config/app_config.dart`
-
-## Core API / Protocol
-
-Key HTTP endpoints:
-
-1. `GET /sessions`
-2. `GET /sessions/latest`
-3. `PATCH /sessions/{session_id}/rate` (query: `rating=1..5`) ← Phase 6
-4. `GET /profiles/{profile_id}`
-5. `PUT /profiles/{profile_id}`
-6. `GET /profiles/{profile_id}/memory`
-7. `POST /profiles/{profile_id}/memory`
-8. `GET /profiles/{profile_id}/memory-context`
-9. `POST /devices/push-token`
-10. `POST /devices/push-token/deactivate`
-11. `GET /notifications`
-12. `POST /notifications/{id}/read`
-13. `GET /clinical-resources` (optional: `?city=jakarta&resource_type=clinic&limit=50`)
-14. `GET /clinical-resources/{id}`
-15. `POST /admin/clinical-resources` (`X-Admin-Secret` required)
-16. `PATCH /admin/clinical-resources/{id}` (`X-Admin-Secret` required)
-17. `GET /admin/rules/debug` (admin token required)
-18. `GET /admin/push/devices` (admin token required)
-19. `POST /admin/push/test` (admin token required)
-
-WebSocket:
-
-1. `GET /ws/live` (query: `user_id`, optional `profile_id`)
-
-Important server event:
-
-1. `profile_memory_status` indicates profile memory context is active for the session.
-
-## Environment Variables (Important)
-
-Core:
-
-1. `GEMINI_API_KEY`
-2. `NEURODECODE_LIVE_MODEL`
-3. `NEURODECODE_RESPONSE_MODALITY`
-
-Memory / profile:
-
-1. `NEURODECODE_ENABLE_PROFILE_MEMORY_CONTEXT`
-2. `NEURODECODE_PROFILE_MEMORY_ITEM_LIMIT`
-3. `NEURODECODE_PROFILE_MEMORY_SESSION_LIMIT`
-
-Summary / notifications:
-
-1. `NEURODECODE_SUMMARY_ENABLED`
-2. `NEURODECODE_SUMMARY_MODEL`
-3. `TELEGRAM_BOT_TOKEN`
-4. `TELEGRAM_CHAT_ID`
-
-Firestore:
-
-1. `NEURODECODE_FIRESTORE_ENABLED`
-2. `NEURODECODE_FIRESTORE_COLLECTION`
-3. `NEURODECODE_FIRESTORE_EVENT_COLLECTION`
-4. `NEURODECODE_FIRESTORE_PROFILE_COLLECTION`
-5. `NEURODECODE_FIRESTORE_PROFILE_MEMORY_COLLECTION`
-6. `NEURODECODE_FIRESTORE_PROJECT`
-
-Admin debug (optional):
-
-1. `NEURODECODE_ADMIN_DEBUG_ENABLED`
-2. `NEURODECODE_ADMIN_DEBUG_TOKEN`
-3. `NEURODECODE_ADMIN_DEBUG_MAX_ITEMS`
-
-FCM push (optional, feature-flagged):
-
-1. `NEURODECODE_FCM_ENABLED`
-2. `NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION`
-
-## Secure Rollout (Cloud Run)
-
-Use this sequence for safe activation without exposing secrets in git.
-
-1. Keep all new flags `OFF` by default in production.
-2. Store sensitive values in Secret Manager (do not hardcode in repo or `cloudbuild.yaml`).
-3. Enable admin debug first, verify output, then enable FCM.
-
-Suggested Secret Manager names:
-
-1. `neurodecode-gemini-api-key`
-2. `neurodecode-admin-debug-token`
-
-Cloud Run update (PowerShell) - baseline runtime (replace project/region/service as needed):
-
-```powershell
-gcloud run services update neurodecode-backend `
-    --project gen-lang-client-0348071142 `
-    --region asia-southeast1 `
-    --platform managed `
-    --set-secrets GEMINI_API_KEY=neurodecode-gemini-api-key:latest `
-    --set-secrets NEURODECODE_ADMIN_DEBUG_TOKEN=neurodecode-admin-debug-token:latest `
-    --update-env-vars NEURODECODE_ADMIN_DEBUG_ENABLED=1,NEURODECODE_ADMIN_DEBUG_MAX_ITEMS=500,NEURODECODE_FCM_ENABLED=0,NEURODECODE_FIRESTORE_PUSH_DEVICE_COLLECTION=push_device_tokens
-```
-
-Enable FCM after admin debug passes:
-
-```powershell
-gcloud run services update neurodecode-backend `
-    --project gen-lang-client-0348071142 `
-    --region asia-southeast1 `
-    --platform managed `
-    --update-env-vars NEURODECODE_FCM_ENABLED=1
-```
-
-Quick verification after update:
-
-```powershell
-gcloud run services describe neurodecode-backend `
-    --project gen-lang-client-0348071142 `
-    --region asia-southeast1 `
-    --platform managed `
-    --format="yaml(spec.template.spec.containers[0].env)"
-```
-
-If live session suddenly shows `GEMINI_API_KEY is required`, re-apply the `--set-secrets GEMINI_API_KEY=...` command above because Cloud Run runtime env is source-of-truth (local `.env` does not apply to Cloud Run).
-
-Admin debug endpoint usage (read-only):
-
-```text
-GET /admin/rules/debug?admin_token=<TOKEN>&profile_id=<PROFILE_ID>&limit=20
-GET /admin/push/devices?admin_token=<TOKEN>&user_id=<USER_ID>&profile_id=<PROFILE_ID>&limit=20
-POST /admin/push/test?admin_token=<TOKEN>&user_id=<USER_ID>&profile_id=<PROFILE_ID>
-```
-
-FCM activation checklist (after admin debug is healthy):
-
-1. Device registers token via `POST /devices/push-token`.
-2. If needed, deactivate stale token via `POST /devices/push-token/deactivate`.
-3. Use admin test push endpoint before enabling production fanout.
-4. Backend receives proactive notifications as usual.
-5. Turn on `NEURODECODE_FCM_ENABLED=1`.
-6. Verify push send count in Cloud Run logs (`[push] Sent proactive push ...`).
-
-Android Firebase setup required for token issuance:
-
-1. Add [neurodecode_mobile/android/app/google-services.json](neurodecode_mobile/android/app/google-services.json) from Firebase Console for app id `com.neurodecode.neurodecode_mobile`.
-2. Ensure Google Services Gradle plugin is enabled in [neurodecode_mobile/android/settings.gradle](neurodecode_mobile/android/settings.gradle) and [neurodecode_mobile/android/app/build.gradle](neurodecode_mobile/android/app/build.gradle).
-3. Rebuild app after adding file so `FirebaseMessaging.getToken()` can return a valid token.
-
-## Known Current Gaps
-
-These are tracked and expected in current phase:
-
-1. Mid-response audio can still feel slightly slow on some devices.
-2. Camera preview may fail to initialize on certain OEM/driver combinations (retry fallback exists).
-3. FCM banner delivery depends on valid Firebase app setup (`google-services.json`) and valid device token registration.
-
-
-## Release Regression Checklist
-
-Run this checklist before each release/deploy that touches live session, prompt, or audio path.
-
-1. Audio-only single turn
-    - Push-to-talk once (>1 second).
-    - Expect: transcript appears and AI audio response plays clearly.
-2. Audio-only multi-turn
-    - Send at least 3 turns in one session.
-    - Expect: no duplicated opening audio, no robotic slowdown, state transitions stay normal.
-3. Video observer on
-    - Start `Video + audio` mode.
-    - Pause/resume and drag observer preview.
-    - Expect: camera controls work, live response still stable.
-4. Session summary persistence
-    - End session normally.
-    - Expect: summary record saved and visible via `/sessions/latest`.
-5. History / Insights rendering
-    - Open History screen in app.
-    - Expect: latest summary fields load and render correctly.
-6. Profile memory context handshake
-    - Start live with valid Profile ID.
-    - Expect: `profile_memory_status` appears and memory cues are shown when available.
-7. Proactive notifications baseline
-    - After eligible session data, open notifications center.
-    - Expect: unread/read behavior works and references correct session/profile.
-
-Suggested status format per item: `PASS`, `FAIL`, `N/A`.
-
-
-
-
-## Data / Model References
-
-1. Video NN reference: https://github.com/AutismBrainBehavior/Video-Neural-Network-ASD-screening
-2. Audio NN reference: https://github.com/AutismBrainBehavior/Audio-Neural-Network-ASD-screening
-3. Training notebook: `asd_agent_training.ipynb`
-
-
+1. Family Assistant is the main session orchestrator.
+2. Moltbook Agent is the community insight producer.
+3. A2A Agent is the specialist enrichment layer.
+4. Firestore remains the main persistent data layer.
+5. Keras observer models support real-time context enrichment, not diagnosis.

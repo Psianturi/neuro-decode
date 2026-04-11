@@ -1,6 +1,19 @@
-# NeuroDecode AI (Backend)
+# NeuroDecode Backend
 
-FastAPI backend for NeuroDecode AI, serving live multimodal support sessions plus post-session proactive automation.
+FastAPI backend for the NeuroDecode platform that powers the AnakUnggul app experience.
+
+This README is the technical backend companion to the repository root README. The root README explains the product and architecture at a higher level, while this file focuses on backend implementation and operations.
+
+## Backend Role in the System
+
+The backend hosts the Family Assistant live orchestration flow. It is responsible for:
+
+1. accepting live WebSocket sessions,
+2. preparing private memory context,
+3. bridging to Gemini Live,
+4. running observer models,
+5. calling A2A enrichment when needed,
+6. storing sessions, notifications, profile memory, and shared context in Firestore.
 
 ## Current backend capabilities
 

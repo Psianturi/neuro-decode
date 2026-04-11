@@ -39,7 +39,7 @@ class NotificationItem {
 
     return NotificationItem(
       notificationId: pick('notification_id'),
-      title: pick('title', 'NeuroDecode notice'),
+      title: pick('title', 'AnakUnggul notice'),
       message: pick('message', '-'),
       severity: pick('severity', 'info'),
       status: pick('status', 'unread'),

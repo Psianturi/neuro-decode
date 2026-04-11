@@ -1,8 +1,10 @@
-# NeuroDecode Mobile
+# AnakUnggul Mobile App
 
-Flutter Android app for NeuroDecode AI.
+Flutter Android app for the AnakUnggul caregiver experience, powered by the NeuroDecode platform.
 
-The app gives caregivers & parents a real-time co-pilot during stressful sensory moments — speak to get instant guidance, review past sessions, manage a child's support profile, find local ASD clinics and therapists, and receive proactive follow-up notifications automatically after high-severity sessions.
+This README is the technical mobile and frontend companion to the repository root README. The root README stays product-level and architecture-level, while this file focuses on Flutter app behavior, configuration, and mobile setup.
+
+The app gives caregivers and parents a real-time support companion during stressful sensory moments: speak to get instant guidance, review past sessions, manage a child's support profile, find ASD clinics and therapists, and receive proactive follow-up notifications after high-severity sessions.
 
 ## What You Can Do
 
@@ -76,6 +78,12 @@ Bottom navigation bar:
    - Android application ID must match `com.neurodecode.neurodecode_mobile`
 
 ## Configuration
+
+Recommended naming convention:
+
+1. Public app name: AnakUnggul.
+2. Backend/platform name: NeuroDecode.
+3. Existing technical package identifiers can remain unchanged unless you explicitly want a full app rename and Firebase package migration.
 
 Backend host is set in one place:
 

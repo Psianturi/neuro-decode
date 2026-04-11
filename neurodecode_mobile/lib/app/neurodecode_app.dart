@@ -57,7 +57,7 @@ class _NeuroDecodeAppState extends State<NeuroDecodeApp> {
     final activeTheme = AppTheme.forSelection(_themeSelection);
 
     return MaterialApp(
-      title: 'NeuroDecode AI',
+      title: 'AnakUnggul',
       debugShowCheckedModeBanner: false,
       theme: activeTheme,
       darkTheme: AppTheme.darkGreenTheme,
