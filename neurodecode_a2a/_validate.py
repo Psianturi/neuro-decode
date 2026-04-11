@@ -58,6 +58,9 @@ def call_a2a(label, text, use_kind=False):
         part0 = data.get("result", {}).get("artifacts", [{}])[0].get("parts", [{}])[0] if data.get("result", {}).get("artifacts") else {}
         has_type = part0.get("type") == "text"
         check(f"{label} [parts type=text]", has_type)
+        # A2A v1 §4.1.3 + §5.5: state enum must be SCREAMING_SNAKE_CASE ProtoJSON form
+        state = data.get("result", {}).get("status", {}).get("state", "")
+        check(f"{label} [status.state=TASK_STATE_COMPLETED]", state == "TASK_STATE_COMPLETED")
         ok = bool(text_out and len(text_out) > 10)
         check(label, ok)
         if ok:
@@ -84,10 +87,14 @@ try:
     check("top-level url absent", "url" not in card)
     check("preferredTransport absent", "preferredTransport" not in card)
     check("stateTransitionHistory absent", "stateTransitionHistory" not in card.get("capabilities", {}))
+    # A2A v1 §4.5.1-4.5.2: SecurityScheme is proto discriminated union;
+    # APIKeySecurityScheme uses 'location' (not 'in'), wrapped in 'apiKeySecurityScheme' key.
     api_key_scheme = card.get("securitySchemes", {}).get("apiKey", {})
-    check("securitySchemes.apiKey.type=apiKey", api_key_scheme.get("type") == "apiKey")
-    check("securitySchemes.apiKey.in=header", api_key_scheme.get("in") == "header")
-    check("securityRequirements present", isinstance(card.get("securityRequirements"), list))
+    inner = api_key_scheme.get("apiKeySecurityScheme", {})
+    check("securitySchemes.apiKey.apiKeySecurityScheme present", bool(inner))
+    check("securitySchemes.apiKey.apiKeySecurityScheme.location=header", inner.get("location") == "header")
+    check("securitySchemes.apiKey.apiKeySecurityScheme.name=X-API-Key", inner.get("name") == "X-API-Key")
+    check("security (securityRequirements) present", isinstance(card.get("security"), list))
     check("version 1.1.0", card.get("version") == "1.1.0")
     check("defaultInputModes text/plain", "text/plain" in card.get("defaultInputModes", []))
 except Exception as exc:

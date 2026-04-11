@@ -81,16 +81,18 @@ async def agent_card() -> JSONResponse:
             "streaming": False,
             "pushNotifications": False,
         },
-        # Prompt Opinion expects OpenAPI-style discriminator on security schemes.
+        # A2A v1: SecurityScheme is a proto discriminated union (§4.5.1–4.5.2).
+        # APIKeySecurityScheme uses 'location' (not 'in') and has no 'type' field.
         "securitySchemes": {
             "apiKey": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key",
-                "description": "API key for NeuroDecode A2A agent access",
+                "apiKeySecurityScheme": {
+                    "location": "header",
+                    "name": "X-API-Key",
+                    "description": "API key for NeuroDecode A2A agent access",
+                }
             }
         },
-        "securityRequirements": [{"apiKey": []}],
+        "security": [{"apiKey": []}],
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["text/plain"],
         "skills": [
@@ -244,7 +246,15 @@ async def a2a_endpoint(request: dict) -> dict:
             return {
                 "jsonrpc": "2.0",
                 "id": request.get("id"),
-                "error": {"code": -32600, "message": "No text content in request"},
+                "error": {
+                    "code": -32600,
+                    "message": "No text content in request",
+                    "data": [{
+                        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                        "reason": "INVALID_REQUEST",
+                        "domain": "a2a-protocol.org",
+                    }],
+                },
             }
 
         request_id = str(request.get("id") or "")
@@ -390,7 +400,7 @@ async def a2a_endpoint(request: dict) -> dict:
             "result": {
                 "id": request.get("id", "task-1"),
                 "contextId": session_id,
-                "status": {"state": "completed"},
+                "status": {"state": "TASK_STATE_COMPLETED"},
                 "artifacts": [{
                     "artifactId": "response-1",
                     "parts": [{"type": "text", "text": safe_response_text}]
@@ -409,7 +419,7 @@ async def a2a_endpoint(request: dict) -> dict:
                 "result": {
                     "id": request.get("id", "task-1"),
                     "contextId": request.get("params", {}).get("sessionId", "default"),
-                    "status": {"state": "completed"},
+                    "status": {"state": "TASK_STATE_COMPLETED"},
                     "artifacts": [{
                         "artifactId": "response-1",
                         "parts": [{
@@ -426,5 +436,13 @@ async def a2a_endpoint(request: dict) -> dict:
         return {
             "jsonrpc": "2.0",
             "id": request.get("id"),
-            "error": {"code": -32603, "message": str(exc)},
+            "error": {
+                "code": -32603,
+                "message": "Internal agent error",
+                "data": [{
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": "INTERNAL_ERROR",
+                    "domain": "a2a-protocol.org",
+                }],
+            },
         }
