@@ -54,6 +54,13 @@ def _build_task_result(task_id: str, context_id: str, response_text: str) -> dic
         }],
     }
 
+    # Keep this hybrid shape intact for Prompt Opinion compatibility.
+    # PO currently depends on all of the following at once:
+    # - result.kind == "task"
+    # - result.task wrapper present
+    # - duplicated top-level task fields via **task below
+    # - parts carrying both type="text" and kind="text"
+    # - status.state using legacy lowercase "completed"
     # Prompt Opinion appears to require the legacy response discriminator while
     # newer A2A clients expect the wrapper member name.
     return {
