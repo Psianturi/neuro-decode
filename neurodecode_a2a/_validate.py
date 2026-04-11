@@ -55,6 +55,9 @@ def call_a2a(label, text, use_kind=False):
                 text_out = data["result"]["status"]["message"]["parts"][0]["text"]
             except Exception:
                 pass
+        part0 = data.get("result", {}).get("artifacts", [{}])[0].get("parts", [{}])[0] if data.get("result", {}).get("artifacts") else {}
+        has_type = part0.get("type") == "text"
+        check(f"{label} [parts type=text]", has_type)
         ok = bool(text_out and len(text_out) > 10)
         check(label, ok)
         if ok:
@@ -81,7 +84,10 @@ try:
     check("top-level url absent", "url" not in card)
     check("preferredTransport absent", "preferredTransport" not in card)
     check("stateTransitionHistory absent", "stateTransitionHistory" not in card.get("capabilities", {}))
-    check("apiKeySecurityScheme present", "apiKeySecurityScheme" in str(card.get("securitySchemes", {})))
+    api_key_scheme = card.get("securitySchemes", {}).get("apiKey", {})
+    check("securitySchemes.apiKey.type=apiKey", api_key_scheme.get("type") == "apiKey")
+    check("securitySchemes.apiKey.in=header", api_key_scheme.get("in") == "header")
+    check("securityRequirements present", isinstance(card.get("securityRequirements"), list))
     check("version 1.1.0", card.get("version") == "1.1.0")
     check("defaultInputModes text/plain", "text/plain" in card.get("defaultInputModes", []))
 except Exception as exc:

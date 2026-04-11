@@ -81,17 +81,16 @@ async def agent_card() -> JSONResponse:
             "streaming": False,
             "pushNotifications": False,
         },
-        # A2A v1: securitySchemes uses discriminated union format
+        # Prompt Opinion expects OpenAPI-style discriminator on security schemes.
         "securitySchemes": {
             "apiKey": {
-                "apiKeySecurityScheme": {
-                    "location": "header",
-                    "name": "X-API-Key",
-                    "description": "API key for NeuroDecode A2A agent access",
-                }
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": "API key for NeuroDecode A2A agent access",
             }
         },
-        "security": [{"apiKey": []}],
+        "securityRequirements": [{"apiKey": []}],
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["text/plain"],
         "skills": [
@@ -394,7 +393,7 @@ async def a2a_endpoint(request: dict) -> dict:
                 "status": {"state": "completed"},
                 "artifacts": [{
                     "artifactId": "response-1",
-                    "parts": [{"text": safe_response_text}]
+                    "parts": [{"type": "text", "text": safe_response_text}]
                 }],
             },
         }
@@ -408,14 +407,13 @@ async def a2a_endpoint(request: dict) -> dict:
                 "jsonrpc": "2.0",
                 "id": request.get("id"),
                 "result": {
-                    "kind": "task",
                     "id": request.get("id", "task-1"),
                     "contextId": request.get("params", {}).get("sessionId", "default"),
                     "status": {"state": "completed"},
                     "artifacts": [{
                         "artifactId": "response-1",
                         "parts": [{
-                            "kind": "text",
+                            "type": "text",
                             "text": (
                                 "Service is temporarily busy (high demand). "
                                 "Please retry this same request in a few seconds."
