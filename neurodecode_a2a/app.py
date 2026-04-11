@@ -81,15 +81,13 @@ async def agent_card() -> JSONResponse:
             "streaming": False,
             "pushNotifications": False,
         },
-        # A2A v1: SecurityScheme is a proto discriminated union (§4.5.1–4.5.2).
-        # APIKeySecurityScheme uses 'location' (not 'in') and has no 'type' field.
+        # Prompt Opinion currently expects an explicit type discriminator here.
         "securitySchemes": {
             "apiKey": {
-                "apiKeySecurityScheme": {
-                    "location": "header",
-                    "name": "X-API-Key",
-                    "description": "API key for NeuroDecode A2A agent access",
-                }
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": "API key for NeuroDecode A2A agent access",
             }
         },
         "security": [{"apiKey": []}],

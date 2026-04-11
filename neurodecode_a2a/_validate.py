@@ -87,14 +87,11 @@ try:
     check("top-level url absent", "url" not in card)
     check("preferredTransport absent", "preferredTransport" not in card)
     check("stateTransitionHistory absent", "stateTransitionHistory" not in card.get("capabilities", {}))
-    # A2A v1 §4.5.1-4.5.2: SecurityScheme is proto discriminated union;
-    # APIKeySecurityScheme uses 'location' (not 'in'), wrapped in 'apiKeySecurityScheme' key.
     api_key_scheme = card.get("securitySchemes", {}).get("apiKey", {})
-    inner = api_key_scheme.get("apiKeySecurityScheme", {})
-    check("securitySchemes.apiKey.apiKeySecurityScheme present", bool(inner))
-    check("securitySchemes.apiKey.apiKeySecurityScheme.location=header", inner.get("location") == "header")
-    check("securitySchemes.apiKey.apiKeySecurityScheme.name=X-API-Key", inner.get("name") == "X-API-Key")
-    check("security (securityRequirements) present", isinstance(card.get("security"), list))
+    check("securitySchemes.apiKey.type=apiKey", api_key_scheme.get("type") == "apiKey")
+    check("securitySchemes.apiKey.in=header", api_key_scheme.get("in") == "header")
+    check("securitySchemes.apiKey.name=X-API-Key", api_key_scheme.get("name") == "X-API-Key")
+    check("security present", isinstance(card.get("security"), list))
     check("version 1.1.0", card.get("version") == "1.1.0")
     check("defaultInputModes text/plain", "text/plain" in card.get("defaultInputModes", []))
 except Exception as exc:
