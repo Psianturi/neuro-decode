@@ -45,21 +45,27 @@ def call_a2a(label, text, use_kind=False):
     try:
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read().decode())
+        result = data.get("result", {})
+        task = result.get("task", result)
         text_out = None
         try:
-            text_out = data["result"]["artifacts"][0]["parts"][0]["text"]
+            text_out = task["artifacts"][0]["parts"][0]["text"]
         except Exception:
             pass
         if not text_out:
             try:
-                text_out = data["result"]["status"]["message"]["parts"][0]["text"]
+                text_out = task["status"]["message"]["parts"][0]["text"]
             except Exception:
                 pass
-        part0 = data.get("result", {}).get("artifacts", [{}])[0].get("parts", [{}])[0] if data.get("result", {}).get("artifacts") else {}
+        part0 = task.get("artifacts", [{}])[0].get("parts", [{}])[0] if task.get("artifacts") else {}
+        check(f"{label} [result.kind=task]", result.get("kind") == "task")
+        check(f"{label} [result.task present]", isinstance(result.get("task"), dict))
         has_type = part0.get("type") == "text"
+        has_kind = part0.get("kind") == "text"
         check(f"{label} [parts type=text]", has_type)
+        check(f"{label} [parts kind=text]", has_kind)
         # A2A v1 §4.1.3 + §5.5: state enum must be SCREAMING_SNAKE_CASE ProtoJSON form
-        state = data.get("result", {}).get("status", {}).get("state", "")
+        state = task.get("status", {}).get("state", "")
         check(f"{label} [status.state=TASK_STATE_COMPLETED]", state == "TASK_STATE_COMPLETED")
         ok = bool(text_out and len(text_out) > 10)
         check(label, ok)

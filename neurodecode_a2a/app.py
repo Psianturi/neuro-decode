@@ -37,6 +37,31 @@ def _preferred_language_hint(text: str) -> str:
         return "Indonesian"
     return "English"
 
+
+def _build_task_result(task_id: str, context_id: str, response_text: str) -> dict:
+    artifact_part = {
+        "type": "text",
+        "kind": "text",
+        "text": response_text,
+    }
+    task = {
+        "id": task_id,
+        "contextId": context_id,
+        "status": {"state": "TASK_STATE_COMPLETED"},
+        "artifacts": [{
+            "artifactId": "response-1",
+            "parts": [artifact_part],
+        }],
+    }
+
+    # Prompt Opinion appears to require the legacy response discriminator while
+    # newer A2A clients expect the wrapper member name.
+    return {
+        "kind": "task",
+        "task": task,
+        **task,
+    }
+
 app = FastAPI(title="NeuroDecode A2A Agent")
 app.add_middleware(ApiKeyMiddleware)
 
@@ -399,15 +424,11 @@ async def a2a_endpoint(request: dict) -> dict:
         return {
             "jsonrpc": "2.0",
             "id": request.get("id"),
-            "result": {
-                "id": request.get("id", "task-1"),
-                "contextId": session_id,
-                "status": {"state": "TASK_STATE_COMPLETED"},
-                "artifacts": [{
-                    "artifactId": "response-1",
-                    "parts": [{"type": "text", "text": safe_response_text}]
-                }],
-            },
+            "result": _build_task_result(
+                task_id=str(request.get("id", "task-1")),
+                context_id=session_id,
+                response_text=safe_response_text,
+            ),
         }
 
     except Exception as exc:
@@ -418,21 +439,14 @@ async def a2a_endpoint(request: dict) -> dict:
             return {
                 "jsonrpc": "2.0",
                 "id": request.get("id"),
-                "result": {
-                    "id": request.get("id", "task-1"),
-                    "contextId": request.get("params", {}).get("sessionId", "default"),
-                    "status": {"state": "TASK_STATE_COMPLETED"},
-                    "artifacts": [{
-                        "artifactId": "response-1",
-                        "parts": [{
-                            "type": "text",
-                            "text": (
-                                "Service is temporarily busy (high demand). "
-                                "Please retry this same request in a few seconds."
-                            ),
-                        }],
-                    }],
-                },
+                "result": _build_task_result(
+                    task_id=str(request.get("id", "task-1")),
+                    context_id=request.get("params", {}).get("sessionId", "default"),
+                    response_text=(
+                        "Service is temporarily busy (high demand). "
+                        "Please retry this same request in a few seconds."
+                    ),
+                ),
             }
 
         return {
