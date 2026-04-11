@@ -69,7 +69,11 @@ async def agent_card() -> JSONResponse:
             "organization": "NeuroDecode AI",
             "url": "https://github.com/Psianturi/neuro-decode",
         },
-        # A2A v1: supportedInterfaces replaces url + preferredTransport
+        # Keep legacy top-level transport fields for Prompt Opinion's older
+        # AgentCard parser while also serving the v1 supportedInterfaces shape.
+        "url": _SERVICE_URL,
+        "preferredTransport": "JSONRPC",
+        "protocolVersion": "1.0",
         "supportedInterfaces": [
             {
                 "url": _SERVICE_URL,

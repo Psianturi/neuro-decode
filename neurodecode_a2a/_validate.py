@@ -84,8 +84,9 @@ try:
     with urllib.request.urlopen(req, timeout=10) as r:
         card = json.loads(r.read().decode())
     check("supportedInterfaces present", "supportedInterfaces" in card)
-    check("top-level url absent", "url" not in card)
-    check("preferredTransport absent", "preferredTransport" not in card)
+    check("top-level url present", card.get("url") == BASE)
+    check("preferredTransport=JSONRPC", card.get("preferredTransport") == "JSONRPC")
+    check("top-level protocolVersion=1.0", card.get("protocolVersion") == "1.0")
     check("stateTransitionHistory absent", "stateTransitionHistory" not in card.get("capabilities", {}))
     api_key_scheme = card.get("securitySchemes", {}).get("apiKey", {})
     check("securitySchemes.apiKey.type=apiKey", api_key_scheme.get("type") == "apiKey")
