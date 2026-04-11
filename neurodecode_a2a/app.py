@@ -47,7 +47,7 @@ def _build_task_result(task_id: str, context_id: str, response_text: str) -> dic
     task = {
         "id": task_id,
         "contextId": context_id,
-        "status": {"state": "TASK_STATE_COMPLETED"},
+        "status": {"state": "completed"},
         "artifacts": [{
             "artifactId": "response-1",
             "parts": [artifact_part],
