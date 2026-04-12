@@ -2,7 +2,7 @@
 
 NeuroDecode is the platform and system architecture behind AnakUnggul, a multimodal ASD caregiver support experience built around three cooperating services:
 
-1. Family Assistant, the main live session orchestrator.
+1. Session Orchestrator, the main live session orchestrator.
 2. Moltbook Agent, the community insight harvester.
 3. A2A Agent, the specialist reasoning and resource agent.
 
@@ -12,7 +12,7 @@ For product naming, the clearest split is:
 
 1. AnakUnggul for the public-facing app and user experience.
 2. NeuroDecode for the technical platform and repository.
-3. Family Assistant for the live orchestration agent inside the platform.
+3. Session Orchestrator for the live orchestration agent inside the platform.
 
 ## What NeuroDecode Does
 
@@ -33,7 +33,7 @@ NeuroDecode combines:
 flowchart LR
     User[Caregiver using Flutter app] --> App[Flutter Mobile App]
 
-    App -->|wss /ws/live| FA[Family Assistant on Cloud Run]
+    App -->|wss /ws/live| FA[Session Orchestrator on Cloud Run]
     App -->|REST| FA
 
     FA --> Gemini[Gemini Live API]
@@ -50,9 +50,9 @@ flowchart LR
 
 ## Three Main Services
 
-### 1. Family Assistant
+### 1. Session Orchestrator
 
-Family Assistant is the main brain of the product flow. It is the service that owns the live caregiver session.
+Session Orchestrator is the main brain of the product flow. It is the service that owns the live caregiver session.
 
 Its responsibilities are:
 
@@ -63,13 +63,13 @@ Its responsibilities are:
 5. Ask the A2A Agent for specialist help when needed.
 6. Save session summaries, events, and notifications to Firestore.
 
-In practice, Family Assistant is not just chat. It is the orchestrator that coordinates memory, observers, Gemini, storage, and external enrichment.
+In practice, Session Orchestrator is not just chat. It is the orchestrator that coordinates memory, observers, Gemini, storage, and external enrichment.
 
-#### Family Assistant Flow
+#### Session Orchestrator Flow
 
 ```mermaid
 flowchart TD
-    A[Flutter opens live session] --> B[Family Assistant accepts WebSocket]
+    A[Flutter opens live session] --> B[Session Orchestrator accepts WebSocket]
     B --> C[Load profile and recent memory from Firestore]
     C --> D[Build private session context]
     D --> E[Start Gemini Live session]
@@ -84,18 +84,18 @@ flowchart TD
     L --> M[Generate summary and save data to Firestore]
 ```
 
-#### Family Assistant Input
+#### Session Orchestrator Input
 
-Family Assistant receives:
+Session Orchestrator receives:
 
 1. Audio chunks from the microphone.
 2. Optional camera frames.
 3. Text messages.
 4. `user_id` and optional `profile_id`.
 
-#### Family Assistant Output
+#### Session Orchestrator Output
 
-Family Assistant returns:
+Session Orchestrator returns:
 
 1. Spoken Gemini responses.
 2. Input and output transcripts.
@@ -103,7 +103,7 @@ Family Assistant returns:
 4. Profile-memory status for the current session.
 5. Post-session summary and follow-up data saved to Firestore.
 
-#### Private Memory in Family Assistant
+#### Private Memory in Session Orchestrator
 
 Private memory is internal context prepared by the backend for Gemini. It is called private because it is not meant to be quoted directly back to the caregiver.
 
@@ -132,7 +132,7 @@ flowchart TD
     B --> C[Extract reusable ASD caregiving insight]
     C --> D[Remove direct personal identity]
     D --> E[Save insight to community_insights in Firestore]
-    E --> F[Family Assistant loads recent insights]
+    E --> F[Session Orchestrator loads recent insights]
     F --> G[Relevance filter keeps only safe relevant non-contradictory items]
     G --> H[Selected insights become part of private session context]
 ```
@@ -151,19 +151,19 @@ Examples of what should not be stored here:
 
 1. Private caregiver identity.
 2. Profile-specific personal notes from a child session.
-3. Raw conversation dumps from Family Assistant.
+3. Raw conversation dumps from Session Orchestrator.
 
 #### Why Moltbook Matters
 
 Moltbook gives NeuroDecode a second knowledge layer beyond profile memory.
 
-Without it, Family Assistant only knows:
+Without it, Session Orchestrator only knows:
 
 1. the current child profile,
 2. recent sessions,
 3. generic model knowledge.
 
-With Moltbook, Family Assistant also gains community-derived insight, as long as it is filtered so it does not contradict the child profile.
+With Moltbook, Session Orchestrator also gains community-derived insight, as long as it is filtered so it does not contradict the child profile.
 
 ### 3. A2A Agent
 
@@ -182,17 +182,17 @@ Its role is to answer focused specialist requests such as:
 
 ```mermaid
 flowchart TD
-    A[Family Assistant detects a specialist need] --> B[Build short focused prompt]
+    A[Session Orchestrator detects a specialist need] --> B[Build short focused prompt]
     B --> C[Send request to A2A Agent]
     C --> D[A2A selects the right tool]
     D --> E[Return concise specialist result]
-    E --> F[Family Assistant injects result into live context]
+    E --> F[Session Orchestrator injects result into live context]
     F --> G[Gemini answers caregiver with richer guidance]
 ```
 
 #### Important A2A Design Notes
 
-1. A2A communicates directly with Family Assistant over HTTP.
+1. A2A communicates directly with Session Orchestrator over HTTP.
 2. A2A is fail-open, so if it is slow or unavailable, the live session still continues.
 3. A2A is not the persistent memory store for live sessions.
 4. A2A can enrich the current session context, but that does not automatically become long-term memory.
@@ -202,19 +202,19 @@ flowchart TD
 
 In one sentence:
 
-1. Family Assistant runs the session.
+1. Session Orchestrator runs the session.
 2. Moltbook contributes community knowledge.
 3. A2A contributes specialist reasoning and resource lookup.
 
 The collaboration looks like this:
 
-1. Flutter starts a live session with Family Assistant.
-2. Family Assistant loads profile memory and recent session patterns from Firestore.
-3. Family Assistant optionally adds filtered Moltbook insights.
+1. Flutter starts a live session with Session Orchestrator.
+2. Session Orchestrator loads profile memory and recent session patterns from Firestore.
+3. Session Orchestrator optionally adds filtered Moltbook insights.
 4. Observer models watch audio and vision signals.
-5. If needed, Family Assistant asks A2A for specialist help.
+5. If needed, Session Orchestrator asks A2A for specialist help.
 6. Gemini responds using all of that context.
-7. After the session, Family Assistant saves the result back to Firestore.
+7. After the session, Session Orchestrator saves the result back to Firestore.
 
 ## Observer Models and Thresholds
 
@@ -321,7 +321,7 @@ NeuroDecode is designed so that the mobile app stays thin and the main logic sta
 
 Cloud Run hosts:
 
-1. the main Family Assistant backend,
+1. the main Session Orchestrator backend,
 2. the A2A Agent service,
 3. supporting deployed services such as the Moltbook pipeline when enabled.
 
@@ -343,8 +343,8 @@ The Flutter app does not run orchestration logic locally.
 
 Instead:
 
-1. Flutter sends live input to Family Assistant on Cloud Run.
-2. Family Assistant talks to Gemini, Firestore, observer models, and A2A.
+1. Flutter sends live input to Session Orchestrator on Cloud Run.
+2. Session Orchestrator talks to Gemini, Firestore, observer models, and A2A.
 3. Flutter receives only the session outputs it needs to present to the caregiver.
 
 ## Repository Structure
@@ -410,7 +410,7 @@ The long-term direction for NeuroDecode and AnakUnggul includes:
 
 ## Notes
 
-1. Family Assistant is the main session orchestrator.
+1. Session Orchestrator is the main session orchestrator.
 2. Moltbook Agent is the community insight producer.
 3. A2A Agent is the specialist enrichment layer.
 4. Firestore remains the main persistent data layer.

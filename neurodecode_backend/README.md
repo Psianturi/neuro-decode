@@ -6,7 +6,7 @@ This README is the technical backend companion to the repository root README. Th
 
 ## Backend Role in the System
 
-The backend hosts the Family Assistant live orchestration flow. It is responsible for:
+The backend hosts the Session Orchestrator live orchestration flow. It is responsible for:
 
 1. accepting live WebSocket sessions,
 2. preparing private memory context,
