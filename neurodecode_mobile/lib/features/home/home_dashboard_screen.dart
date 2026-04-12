@@ -504,42 +504,33 @@ class _BrandHeaderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final surfaceColor = Theme.of(context).colorScheme.surface;
-    final titleStyle = Theme.of(context).textTheme.headlineSmall;
     final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
           color: NeuroColors.textSecondary,
         );
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(NeuroColors.spacingMd),
+      padding: const EdgeInsets.symmetric(
+        horizontal: NeuroColors.spacingMd,
+        vertical: NeuroColors.spacingLg,
+      ),
       decoration: BoxDecoration(
         color: surfaceColor,
         borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
       ),
-      child: Row(
+      child: Column(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Image.asset(
-              'assets/AnakUnggul-logo.png',
-              width: 96,
-              height: 96,
-              fit: BoxFit.contain,
-            ),
+          Image.asset(
+            'assets/AnakUnggul-logo.png',
+            width: 80,
+            height: 80,
+            fit: BoxFit.contain,
           ),
-          const SizedBox(width: NeuroColors.spacingMd),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('AnakUnggul', style: titleStyle),
-                const SizedBox(height: 6),
-                Text(
-                  'Real-time caregiver support for calm, guided responses during difficult sensory moments.',
-                  style: bodyStyle,
-                ),
-              ],
-            ),
+          const SizedBox(height: NeuroColors.spacingSm),
+          Text(
+            'Real-time caregiver support for calm,\nguided responses during difficult sensory moments.',
+            textAlign: TextAlign.center,
+            style: bodyStyle,
           ),
         ],
       ),
