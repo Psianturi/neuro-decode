@@ -1519,9 +1519,6 @@ async def ws_live(websocket: WebSocket) -> None:
         async def _run_resource_lookup_enrichment(query_text: str, *, trigger_source: str) -> None:
             nonlocal _last_resource_lookup_signature, _last_resource_lookup_ts
             try:
-                if not settings.a2a_skill_enrichment_enabled or not settings.a2a_url:
-                    return
-
                 query = str(query_text or "").strip()
                 if not query or not _looks_like_location_resource_query(query):
                     return
@@ -1539,29 +1536,16 @@ async def ws_live(websocket: WebSocket) -> None:
                 _last_resource_lookup_signature = signature
                 _last_resource_lookup_ts = now
 
-                profile_ctx = _build_profile_context_snippet()
-                a2a_prompt = (
-                    "Use find_asd_resources to recommend ASD-relevant resources for this caregiver query. "
-                    "Return concise practical output: 3-5 options with city, type, and contact/next step when available. "
-                    f"Caregiver query: {query}. "
-                    f"Location hint: {location_hint}."
-                )
-                if profile_ctx:
-                    a2a_prompt += f" Child profile context: {profile_ctx}."
+                resource_ctx: str | None = None
+                source = "none"
 
-                resource_ctx = await _a2a_call_skill(
-                    a2a_url=settings.a2a_url,
-                    prompt=a2a_prompt,
-                    api_key=settings.a2a_api_key,
-                    timeout=3.0,
-                )
-                source = "a2a"
-
-                # Fallback to curated Firestore only for Jakarta lookups when A2A is unavailable.
-                if not resource_ctx and location_hint.lower() == "jakarta":
+                # Tier 1: curated Firestore — fast, deterministic, no external call.
+                # Active as long as Firestore is enabled, independent of A2A flag.
+                if settings.firestore_enabled and location_hint != "unspecified":
                     try:
-                        curated = _get_clinical_store().list_resources(
-                            city="jakarta",
+                        curated = await asyncio.to_thread(
+                            _get_clinical_store().list_resources,
+                            city=location_hint.lower(),
                             active_only=True,
                             limit=3,
                         )
@@ -1569,7 +1553,27 @@ async def ws_live(websocket: WebSocket) -> None:
                             resource_ctx = _format_curated_resource_hint(curated)
                             source = "firestore_curated"
                     except Exception as e:
-                        print(f"[resource_lookup] curated fallback failed: {e}")
+                        print(f"[resource_lookup] curated Firestore lookup failed: {e}")
+
+                # Tier 2: A2A live search — for cities not covered by curated store.
+                if not resource_ctx and settings.a2a_skill_enrichment_enabled and settings.a2a_url:
+                    profile_ctx = _build_profile_context_snippet()
+                    a2a_prompt = (
+                        "Use find_asd_resources to recommend ASD-relevant resources for this caregiver query. "
+                        "Return concise practical output: 3-5 options with city, type, and contact/next step when available. "
+                        f"Caregiver query: {query}. "
+                        f"Location hint: {location_hint}."
+                    )
+                    if profile_ctx:
+                        a2a_prompt += f" Child profile context: {profile_ctx}."
+                    resource_ctx = await _a2a_call_skill(
+                        a2a_url=settings.a2a_url,
+                        prompt=a2a_prompt,
+                        api_key=settings.a2a_api_key,
+                        timeout=3.0,
+                    )
+                    if resource_ctx:
+                        source = "a2a"
 
                 if resource_ctx:
                     _record_specialist_guidance(f"[ResourceLookup:{source}] {resource_ctx}")
@@ -1886,7 +1890,8 @@ async def ws_live(websocket: WebSocket) -> None:
                     if text.strip():
                         transcript_in_log.append(text.strip())
                         queue_session_event("client_text_message", source="client_text", text=text.strip())
-                        await _run_resource_lookup_enrichment(text.strip(), trigger_source="client_text")
+                        # Non-blocking: resource lookup must not delay forwarding text to Gemini.
+                        asyncio.create_task(_run_resource_lookup_enrichment(text.strip(), trigger_source="client_text"))
                     await session.send_text(text, bool(end_of_turn))
                 elif msg_type == "audio_stream_end":
                     print(f"[client\u2192gemini] audio_stream_end — total {audio_chunk_count} chunks, {total_audio_bytes} bytes sent to Gemini")
