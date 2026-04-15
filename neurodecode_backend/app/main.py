@@ -164,6 +164,27 @@ def _looks_like_location_resource_query(text: str) -> bool:
     return has_resource_term and (has_asd_term or has_city_preposition)
 
 
+_RESOURCE_FOLLOWUP_WINDOW_SECONDS = 120  # carry-forward window per session
+
+
+def _looks_like_resource_followup(text: str) -> bool:
+    """True when utterance is a short continuation of an active resource lookup thread."""
+    normalized = text.strip().lower()
+    if not normalized or len(normalized) > 100:
+        return False
+    _followup_fragments = (
+        "yes", "sure", "ok", "okay", "oke", "ya", "yep", "boleh", "silakan",
+        "give me", "just give", "the list", "just the list", "show me",
+        "the place", "place name", "place names", "the name", "nama", "nama klinik",
+        "the address", "alamat", "address", "lengkap", "detail",
+        "the contact", "contact", "kontak", "telepon", "nomor", "phone",
+        "tell me more", "more info", "more detail", "lebih detail",
+        "what are they", "what is the", "which one", "which ones",
+        "list saja", "langsung saja", "tampilin", "kasih tahu",
+    )
+    return any(phrase in normalized for phrase in _followup_fragments)
+
+
 def _extract_location_hint(text: str) -> str | None:
     matches = re.findall(r"\b(?:di|in)\s+([a-zA-Z][a-zA-Z\s\-]{2,40})", text)
     if not matches:
@@ -1434,6 +1455,7 @@ async def ws_live(websocket: WebSocket) -> None:
         specialist_guidance_log: list[str] = []
         _last_resource_lookup_signature = ""
         _last_resource_lookup_ts = 0.0
+        _last_resource_ctx: str | None = None  # carry-forward: last resolved resource result
         print("[ws_live] Session started — Gemini connected")
 
         def queue_session_event(
@@ -1517,10 +1539,29 @@ async def ws_live(websocket: WebSocket) -> None:
                 del specialist_guidance_log[:-20]
 
         async def _run_resource_lookup_enrichment(query_text: str, *, trigger_source: str) -> None:
-            nonlocal _last_resource_lookup_signature, _last_resource_lookup_ts
+            nonlocal _last_resource_lookup_signature, _last_resource_lookup_ts, _last_resource_ctx
             try:
                 query = str(query_text or "").strip()
-                if not query or not _looks_like_location_resource_query(query):
+                if not query:
+                    return
+
+                # Carry-forward: if query is a follow-up and we have a recent cached result, re-inject.
+                if not _looks_like_location_resource_query(query):
+                    now = time.monotonic()
+                    if (
+                        _last_resource_ctx
+                        and (now - _last_resource_lookup_ts) < _RESOURCE_FOLLOWUP_WINDOW_SECONDS
+                        and _looks_like_resource_followup(query)
+                    ):
+                        await session.send_observer_note(
+                            "Specialist resource context for this caregiver request: "
+                            f"{_last_resource_ctx}",
+                            end_of_turn=False,
+                        )
+                        print(
+                            f"[resource_lookup] carry-forward injected "
+                            f"(trigger={trigger_source}, chars={len(_last_resource_ctx)})"
+                        )
                     return
 
                 normalized_query = re.sub(r"\s+", " ", query.lower()).strip()
@@ -1576,6 +1617,7 @@ async def ws_live(websocket: WebSocket) -> None:
                         source = "a2a"
 
                 if resource_ctx:
+                    _last_resource_ctx = resource_ctx  # store for carry-forward on follow-up turns
                     _record_specialist_guidance(f"[ResourceLookup:{source}] {resource_ctx}")
                     await session.send_observer_note(
                         "Specialist resource context for this caregiver request: "
@@ -2139,5 +2181,14 @@ async def ws_live(websocket: WebSocket) -> None:
                 },
             )
             print(f"[ws_live] Session ending: close_reason={close_reason}")
+            # Grace wait: give background specialist tasks up to 4s to finish before summary,
+            # so specialist_guidance_log is populated before generate_session_summary runs.
+            if _active_skill_tasks:
+                print(f"[ws_live] Waiting for {len(_active_skill_tasks)} active skill task(s) before summary")
+                _done_tasks, _timed_out = await asyncio.wait(_active_skill_tasks, timeout=4.0)
+                for _t in _timed_out:
+                    _t.cancel()
+                if _timed_out:
+                    print(f"[ws_live] {len(_timed_out)} skill task(s) timed out — fail-open")
             await maybe_summarize_and_notify()
             await _store_session_events(list(session_events))
