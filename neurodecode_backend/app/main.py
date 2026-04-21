@@ -35,6 +35,9 @@ load_dotenv()
 
 app = FastAPI(title="NeuroDecode AI Backend")
 
+from app.routers import stats as _stats_router  # noqa: E402
+app.include_router(_stats_router.router, prefix="/stats", tags=["stats"])
+
 IDLE_TIMEOUT_SECONDS = 120
 AUDIO_OBSERVER_COOLDOWN_SECONDS = 4
 VISION_OBSERVER_COOLDOWN_SECONDS = 4
