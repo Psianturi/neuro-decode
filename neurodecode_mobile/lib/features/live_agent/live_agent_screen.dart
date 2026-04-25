@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -88,6 +89,8 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   String? _profileMemoryProfileId;
   List<String> _profileMemoryCues = const <String>[];
   bool _cameraPreviewPaused = false;
+  bool _cameraExpanded = false;
+  bool _cameraZoomed = false;
   Offset _cameraPreviewOffset = const Offset(0, 0);
   int _currentTurnAudioBytes = 0;
   DateTime? _currentTurnStartedAt;
@@ -1228,7 +1231,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 260),
                     itemCount: _transcriptLog.length,
                     itemBuilder: (context, index) {
                       final entry = _transcriptLog[index];
@@ -1372,12 +1375,28 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                       _cameraPreviewOffset += details.delta;
                     });
                   },
-                  child: Container(
-                    width: 120,
-                    height: 160,
+                  onDoubleTap: () {
+                    // Double tap expands the viewport size
+                    setState(() {
+                      _cameraExpanded = !_cameraExpanded;
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.fastOutSlowIn,
+                    width: _cameraExpanded ? 240 : 120,
+                    height: _cameraExpanded ? 320 : 160,
                     decoration: BoxDecoration(
                       border: Border.all(color: primaryColor, width: 2),
+                      color: surfaceColor,
                       borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context).shadowColor.withValues(alpha: 0.1),
+                          blurRadius: 15,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
@@ -1392,21 +1411,59 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                           Positioned(
                             right: 6,
                             top: 6,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                _cameraPreviewPaused ? 'Paused' : 'Live Cam',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!_cameraPreviewPaused) ...[
+                                  GestureDetector(
+                                    onTap: () async {
+                                      if (_cameraController == null) return;
+                                      final maxZoom = await _cameraController!.getMaxZoomLevel();
+                                      final minZoom = await _cameraController!.getMinZoomLevel();
+                                      setState(() {
+                                        _cameraZoomed = !_cameraZoomed;
+                                      });
+                                      await _cameraController!.setZoomLevel(
+                                          _cameraZoomed ? (maxZoom > 2.0 ? 2.0 : maxZoom) : minZoom);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 4),
+                                      margin: const EdgeInsets.only(right: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withValues(alpha: 0.8),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        _cameraZoomed ? '2x' : '1x',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _cameraPreviewPaused 
+                                        ? Colors.black.withValues(alpha: 0.45)
+                                        : Colors.redAccent.withValues(alpha: 0.8),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    _cameraPreviewPaused ? 'Paused' : 'Live',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
                           ),
                         ],
@@ -1472,121 +1529,180 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
                 ),
               ),
             Positioned(
-              bottom: 24,
+              bottom: 0,
               left: 0,
               right: 0,
-              child: Column(
-                children: [
-                  // ── Mic button: only active when connected & not thinking ──
-                  GestureDetector(
-                    onTap: (_isConnected &&
-                            _state != AgentState.speaking &&
-                            _state != AgentState.thinking)
-                        ? _toggleMic
-                        : (_isConnected &&
-                                _state == AgentState.speaking &&
-                                _isMicActive == false)
-                            ? null
-                            : (_isMicActive ? _toggleMic : null),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: !_isConnected
-                            ? Colors.grey.shade400
-                            : (_state == AgentState.speaking
-                                ? Colors.orange
-                                : (_isMicActive
-                                    ? Colors.redAccent
-                                    : (_state == AgentState.thinking
-                                        ? Colors.purple
-                                        : primaryColor))),
-                        shape: BoxShape.circle,
-                        boxShadow: _isMicActive
-                            ? [
-                                BoxShadow(
-                                  color: Colors.red.withValues(alpha: 0.5),
-                                  blurRadius: 20,
-                                  spreadRadius: 5,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: Container(
+                    padding: const EdgeInsets.only(top: 20, bottom: 32, left: 24, right: 24),
+                    decoration: BoxDecoration(
+                      color: surfaceColor.withValues(alpha: isDark ? 0.85 : 0.95),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context).shadowColor.withValues(alpha: 0.08),
+                          blurRadius: 20,
+                          offset: const Offset(0, -4),
+                        )
+                      ],
+                    ),
+                    child: SafeArea(
+                      top: false,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              // Mascot Buddy (Small)
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeInOut,
+                                height: _state == AgentState.speaking ? 85 : 70,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: _getStateColor(_state).withValues(alpha: _state == AgentState.idle ? 0 : 0.4),
+                                      blurRadius: _state == AgentState.speaking ? 25 : 15,
+                                      spreadRadius: _state == AgentState.speaking ? 8 : 2,
+                                    )
+                                  ],
                                 ),
-                              ]
-                            : [],
-                      ),
-                      child: Icon(
-                        !_isConnected
-                            ? Icons.mic_off
-                            : (_state == AgentState.speaking
-                                ? Icons.volume_up
-                                : (_isMicActive
-                                    ? Icons.stop
-                                    : (_state == AgentState.thinking
-                                        ? Icons.hourglass_empty
-                                        : Icons.mic))),
-                        size: 40,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Text(
-                      !_isConnected
-                          ? 'Not connected'
-                          : (_state == AgentState.speaking
-                              ? 'AI is speaking... wait to finish'
-                              : (_isMicActive
-                                  ? 'Recording \u2022 Tap \u25A0 to send'
-                                  : (_state == AgentState.thinking
-                                      ? 'AI is thinking... please wait'
-                                      : 'Tap mic to record, then tap \u25A0 to send'))),
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyMedium?.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                                child: AnimatedScale(
+                                  scale: _state == AgentState.listening ? 1.05 : (_state == AgentState.thinking ? 0.95 : 1.0),
+                                  duration: const Duration(milliseconds: 300),
+                                  child: Image.asset(
+                                    'assets/mascot01.png', 
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
+                              ),
+                              
+                              // Status Text
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Text(
+                                    !_isConnected
+                                        ? 'Not connected'
+                                        : (_state == AgentState.speaking
+                                            ? 'AI is speaking\nWait to finish'
+                                            : (_isMicActive
+                                                ? 'Recording\nTap \u25A0 to send'
+                                                : (_state == AgentState.thinking
+                                                    ? 'AI is thinking\nPlease wait'
+                                                    : 'Tap mic to record\nTap \u25A0 to send'))),
+                                    textAlign: TextAlign.center,
+                                    style: textTheme.bodyMedium?.copyWith(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark ? Colors.white70 : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ),
 
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 56),
-                    child: SizedBox(
-                      height: 48,
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _state == AgentState.connecting
-                            ? null
-                            : (_isConnected
-                                ? () async => _disconnect()
-                                : _connect),
-                        icon: Icon(
-                          _isConnected
-                              ? Icons.stop_circle_outlined
-                              : (_state == AgentState.connecting
-                                  ? Icons.sync
-                                  : Icons.play_circle_outline),
-                        ),
-                        label: Text(
-                          _isConnected
-                              ? 'End Session'
-                              : (_state == AgentState.connecting
-                                  ? 'Connecting...'
-                                  : 'Reconnect'),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              _isConnected ? Colors.red.shade400 : primaryColor,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(NeuroColors.radiusLg),
+                              // Mic Button
+                              GestureDetector(
+                                onTap: (_isConnected &&
+                                        _state != AgentState.speaking &&
+                                        _state != AgentState.thinking)
+                                    ? _toggleMic
+                                    : (_isConnected &&
+                                            _state == AgentState.speaking &&
+                                            _isMicActive == false)
+                                        ? null
+                                        : (_isMicActive ? _toggleMic : null),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding: const EdgeInsets.all(18),
+                                  decoration: BoxDecoration(
+                                    color: !_isConnected
+                                        ? Colors.grey.shade400
+                                        : (_state == AgentState.speaking
+                                            ? Colors.orange
+                                            : (_isMicActive
+                                                ? Colors.redAccent
+                                                : (_state == AgentState.thinking
+                                                    ? Colors.purple
+                                                    : primaryColor))),
+                                    shape: BoxShape.circle,
+                                    boxShadow: _isMicActive
+                                        ? [
+                                            BoxShadow(
+                                              color: Colors.red.withValues(alpha: 0.5),
+                                              blurRadius: 20,
+                                              spreadRadius: 5,
+                                            ),
+                                          ]
+                                        : [],
+                                  ),
+                                  child: Icon(
+                                    !_isConnected
+                                        ? Icons.mic_off
+                                        : (_state == AgentState.speaking
+                                            ? Icons.volume_up
+                                            : (_isMicActive
+                                                ? Icons.stop
+                                                : (_state == AgentState.thinking
+                                                    ? Icons.hourglass_empty
+                                                    : Icons.mic))),
+                                    size: 32,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                          const SizedBox(height: 20),
+                          
+                          // End Session Button
+                          SizedBox(
+                            height: 48,
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _state == AgentState.connecting
+                                  ? null
+                                  : (_isConnected
+                                      ? () async => _disconnect()
+                                      : _connect),
+                              icon: Icon(
+                                _isConnected
+                                    ? Icons.stop_circle_outlined
+                                    : (_state == AgentState.connecting
+                                        ? Icons.sync
+                                        : Icons.play_circle_outline),
+                              ),
+                              label: Text(
+                                _isConnected
+                                    ? 'End Session'
+                                    : (_state == AgentState.connecting
+                                        ? 'Connecting...'
+                                        : 'Reconnect'),
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    _isConnected ? Colors.red.shade50 : primaryColor.withValues(alpha: 0.1),
+                                foregroundColor: 
+                                    _isConnected ? Colors.red.shade700 : primaryColor,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(NeuroColors.radiusLg),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ],
+                ),
               ),
             ),
           ],

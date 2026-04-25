@@ -1,6 +1,10 @@
+import 'dart:ui';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../config/app_identity_store.dart';
 import '../../theme/app_theme.dart';
 
 class MascotBuddyScreen extends StatefulWidget {
@@ -29,12 +33,16 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
   late final Animation<double> _pulseAnimation;
   late final AnimationController _floatController;
   late final Animation<double> _floatAnimation;
+  late final AnimationController _entranceController;
+
+  Offset _tiltOffset = Offset.zero;
 
   String _selectedGuide = 'overview';
   int _phraseIndex = 0;
   bool _isChangingTheme = false;
+  String? _activeProfileName;
 
-  static const List<String> _phrases = [
+  late List<String> _phrases = [
     'Hi! I am Neuro Buddy. Let us keep this moment calm and safe.',
     'Great job. You did your best today, and that matters.',
     'Try this breathing rhythm: inhale for 4, hold for 7, exhale for 8.',
@@ -44,6 +52,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
   @override
   void initState() {
     super.initState();
+    _loadContext();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -58,16 +67,38 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
     _floatAnimation = Tween<double>(begin: -8, end: 8).animate(
       CurvedAnimation(parent: _floatController, curve: Curves.easeInOut),
     );
+    _entranceController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1400),
+    )..forward();
+  }
+
+  Future<void> _loadContext() async {
+    final store = AppIdentityStore();
+    final profileId = await store.getActiveProfileId();
+    if (mounted && profileId != null && profileId.isNotEmpty) {
+      setState(() {
+        _activeProfileName = profileId; // Fallback to ID as name since we don't have a profile name lookup here yet
+        _phrases = [
+          'Hi $_activeProfileName! Buddy is here. Let us keep this moment calm and safe.',
+          'Great job today, $_activeProfileName. You did your best.',
+          'Take a deep breath with me, $_activeProfileName. Inhale for 4, hold for 7, exhale 8.',
+          'You are safe and not alone, $_activeProfileName.',
+        ];
+      });
+    }
   }
 
   @override
   void dispose() {
+    _entranceController.dispose();
     _floatController.dispose();
     _pulseController.dispose();
     super.dispose();
   }
 
   void _onTapMascot() {
+    HapticFeedback.selectionClick();
     setState(() {
       _phraseIndex = (_phraseIndex + 1) % _phrases.length;
     });
@@ -95,16 +126,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
     }
   }
 
-  String get _themeLabel {
-    switch (widget.themeSelection) {
-      case AppVisualTheme.dark:
-        return 'Dark';
-      case AppVisualTheme.pink:
-        return 'Soft Pink';
-      case AppVisualTheme.light:
-        return 'Light';
-    }
-  }
+
 
   Future<void> _openThemeMenu() async {
     await showModalBottomSheet<void>(
@@ -227,47 +249,88 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
         children: [
           GestureDetector(
             onTap: _onTapMascot,
+            onPanUpdate: (details) {
+              setState(() {
+                _tiltOffset += details.delta * 0.05;
+                _tiltOffset = Offset(
+                  _tiltOffset.dx.clamp(-15.0, 15.0),
+                  _tiltOffset.dy.clamp(-15.0, 15.0),
+                );
+              });
+            },
+            onPanEnd: (_) {
+              setState(() {
+                _tiltOffset = Offset.zero;
+              });
+            },
             child: AnimatedBuilder(
               animation: _floatAnimation,
-              builder: (context, child) {
+              builder: (context, _) {
                 return Transform.translate(
-                  offset: Offset(0, _floatAnimation.value),
+                  offset: Offset(_tiltOffset.dx, _floatAnimation.value + _tiltOffset.dy),
                   child: ScaleTransition(
                     scale: _pulseAnimation,
-                    child: child,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Soft glow background
+                        Container(
+                          width: 200,
+                          height: 200,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: primaryColor.withValues(alpha: 0.15),
+                                blurRadius: 40,
+                                spreadRadius: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Glass card container
+                        Container(
+                          padding: const EdgeInsets.all(NeuroColors.spacingMd),
+                          decoration: BoxDecoration(
+                            color: surfaceColor.withValues(alpha: 0.8),
+                            borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.1),
+                              width: 1,
+                            ),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                              child: Image.asset(
+                                'assets/mascot02.png',
+                                height: 260,
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
-              child: Container(
-                padding: const EdgeInsets.all(NeuroColors.spacingMd),
-                decoration: BoxDecoration(
-                  color: surfaceColor,
-                  borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: Image.asset(
-                    'assets/mascot02.png',
-                    height: 260,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
             ),
           ),
           const SizedBox(height: 16),
-          Text(
-            'Tap Buddy to wave hello',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: NeuroColors.spacingMd - 2),
-          Container(
-            padding: const EdgeInsets.all(NeuroColors.spacingMd),
-            decoration: BoxDecoration(
-              color: surfaceColor,
-              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+          AnimatedGlassCard(
+            animation: _entranceController,
+            delay: 0.0,
+            child: Text(
+              'Tap Buddy to interact',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
             ),
+          ),
+          AnimatedGlassCard(
+            animation: _entranceController,
+            delay: 0.1,
             child: Column(
               children: [
                 Text(
@@ -280,12 +343,19 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                   ),
                 ),
                 const SizedBox(height: NeuroColors.spacingSm),
-                Text(
-                  _phrases[_phraseIndex],
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    height: 1.5,
-                    fontSize: 16,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  transitionBuilder: (child, animation) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+                  child: Text(
+                    key: ValueKey<int>(_phraseIndex),
+                    _phrases[_phraseIndex],
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      height: 1.5,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
                 const SizedBox(height: NeuroColors.spacingMd - 2),
@@ -297,84 +367,61 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                     _BuddyActionChip(
                       label: 'How it works',
                       selected: _selectedGuide == 'overview',
-                      onPressed: () =>
-                          setState(() => _selectedGuide = 'overview'),
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        setState(() => _selectedGuide = 'overview');
+                      },
                     ),
                     _BuddyActionChip(
                       label: 'Breathe',
                       selected: _selectedGuide == 'breathe',
-                      onPressed: () =>
-                          setState(() => _selectedGuide = 'breathe'),
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        setState(() => _selectedGuide = 'breathe');
+                      },
                     ),
                     _BuddyActionChip(
                       label: 'Privacy',
                       selected: _selectedGuide == 'privacy',
-                      onPressed: () =>
-                          setState(() => _selectedGuide = 'privacy'),
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        setState(() => _selectedGuide = 'privacy');
+                      },
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          const SizedBox(height: NeuroColors.spacingMd - 2),
-          Container(
-            padding: const EdgeInsets.all(NeuroColors.spacingMd + 2),
-            decoration: BoxDecoration(
-              color: surfaceColor,
-              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
-            ),
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.palette_outlined,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              title: Text(
-                'Theme Mood',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              subtitle: Text(
-                _themeLabel,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _isChangingTheme ? null : _openThemeMenu,
-            ),
-          ),
           if (_isChangingTheme) ...[
             const SizedBox(height: NeuroColors.spacingSm),
             const LinearProgressIndicator(minHeight: 3),
           ],
-          const SizedBox(height: NeuroColors.spacingMd - 2),
-          Container(
-            padding: const EdgeInsets.all(NeuroColors.spacingMd + 2),
-            decoration: BoxDecoration(
-              color: surfaceColor,
-              borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
-            ),
+          AnimatedGlassCard(
+            animation: _entranceController,
+            delay: 0.2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _guideTitle,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 22),
-                ),
-                const SizedBox(height: NeuroColors.spacingSm + 2),
-                Text(
-                  _guideBody,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    height: 1.55,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Text(
+                    key: ValueKey<String>(_guideTitle),
+                    _guideTitle,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 22),
                   ),
                 ),
-                const SizedBox(height: NeuroColors.spacingMd - 2),
-                // Text(
-                //   'Use the Support tab below whenever you need live help.',
-                //   style: TextStyle(
-                //     color: const Color(0xFF6EA1D5).withValues(alpha: 0.95),
-                //     fontWeight: FontWeight.w600,
-                //   ),
-                // ),
+                const SizedBox(height: NeuroColors.spacingSm + 2),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Text(
+                    key: ValueKey<String>(_guideBody),
+                    _guideBody,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      height: 1.55,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -504,6 +551,71 @@ class _ThemeMenuTile extends StatelessWidget {
                     .withValues(alpha: 0.45),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class AnimatedGlassCard extends StatelessWidget {
+  const AnimatedGlassCard({
+    super.key,
+    required this.child,
+    required this.animation,
+    this.delay = 0.0,
+  });
+
+  final Widget child;
+  final Animation<double> animation;
+  final double delay;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = delay;
+    final end = (delay + 0.4).clamp(0.0, 1.0);
+    
+    return FadeTransition(
+      opacity: CurvedAnimation(
+        parent: animation,
+        curve: Interval(start, end, curve: Curves.easeOut),
+      ),
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: animation,
+            curve: Interval(start, end, curve: Curves.easeOutCubic),
+          ),
+        ),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: NeuroColors.spacingMd - 2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+            boxShadow: [
+              BoxShadow(
+                color: Theme.of(context).shadowColor.withValues(alpha: 0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              )
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
+                padding: const EdgeInsets.all(NeuroColors.spacingMd + 2),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                    width: 1,
+                  ),
+                ),
+                child: child,
+              ),
+            ),
+          ),
         ),
       ),
     );
