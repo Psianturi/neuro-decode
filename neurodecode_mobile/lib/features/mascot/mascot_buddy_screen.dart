@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 
 import '../../config/app_identity_store.dart';
 import '../../theme/app_theme.dart';
+import '../profile/profile_memory_service.dart';
+import 'daily_checkin_service.dart';
 
 class MascotBuddyScreen extends StatefulWidget {
   const MascotBuddyScreen({
@@ -37,16 +39,30 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
 
   Offset _tiltOffset = Offset.zero;
 
-  String _selectedGuide = 'overview';
-  int _phraseIndex = 0;
   bool _isChangingTheme = false;
+  String? _activeProfileId;
   String? _activeProfileName;
+  final ProfileMemoryService _profileMemoryService = ProfileMemoryService();
+  final DailyCheckinService _checkinService = DailyCheckinService();
+
+  // Selected quick chips
+  final Set<String> _selectedChips = {};
+  final TextEditingController _notesController = TextEditingController();
+  bool _isSaving = false;
+
+  final List<String> _checkInChips = [
+    'Everything calm',
+    'Sensory overload',
+    'Mild meltdown',
+    'Hard to sleep',
+    'Big transition difficulty',
+    'New trigger noticed',
+  ];
 
   late List<String> _phrases = [
-    'Hi! I am Neuro Buddy. Let us keep this moment calm and safe.',
-    'Great job. You did your best today, and that matters.',
-    'Try this breathing rhythm: inhale for 4, hold for 7, exhale for 8.',
-    'You are not alone. I am right here with you.',
+    'Hi! I am Neuro Buddy. How was today?',
+    'Take a deep breath. I am listening.',
+    'You are doing great.',
   ];
 
   @override
@@ -76,14 +92,32 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
   Future<void> _loadContext() async {
     final store = AppIdentityStore();
     final profileId = await store.getActiveProfileId();
-    if (mounted && profileId != null && profileId.isNotEmpty) {
+    if (!mounted || profileId == null || profileId.isEmpty) {
+      return;
+    }
+
+    var profileLabel = profileId;
+    try {
+      final profile = await _profileMemoryService.fetchProfile(profileId);
+      final preferredName = profile?.childName.trim();
+      final fallbackName = profile?.name.trim();
+      if (preferredName != null && preferredName.isNotEmpty) {
+        profileLabel = preferredName;
+      } else if (fallbackName != null && fallbackName.isNotEmpty) {
+        profileLabel = fallbackName;
+      }
+    } catch (_) {
+      // Keep the profile id fallback if profile details are unavailable.
+    }
+
+    if (mounted) {
       setState(() {
-        _activeProfileName = profileId; // Fallback to ID as name since we don't have a profile name lookup here yet
+        _activeProfileId = profileId;
+        _activeProfileName = profileLabel;
         _phrases = [
-          'Hi $_activeProfileName! Buddy is here. Let us keep this moment calm and safe.',
-          'Great job today, $_activeProfileName. You did your best.',
-          'Take a deep breath with me, $_activeProfileName. Inhale for 4, hold for 7, exhale 8.',
-          'You are safe and not alone, $_activeProfileName.',
+          'Hi, how was $_activeProfileName\'s day today?',
+          'Take a deep breath. How is $_activeProfileName feeling?',
+          'I am here to help you reflect on $_activeProfileName\'s day.',
         ];
       });
     }
@@ -91,17 +125,31 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
 
   @override
   void dispose() {
+    _notesController.removeListener(_handleNotesChanged);
+    _notesController.dispose();
     _entranceController.dispose();
     _floatController.dispose();
     _pulseController.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _notesController.removeListener(_handleNotesChanged);
+    _notesController.addListener(_handleNotesChanged);
+  }
+
+  void _handleNotesChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _onTapMascot() {
     HapticFeedback.selectionClick();
-    setState(() {
-      _phraseIndex = (_phraseIndex + 1) % _phrases.length;
-    });
+    _phrases.shuffle();
+    setState(() {}); 
     _pulseController
       ..stop()
       ..forward(from: 0.0)
@@ -126,7 +174,136 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
     }
   }
 
+  Future<void> _saveCheckIn() async {
+    if (_selectedChips.isEmpty && _notesController.text.trim().isEmpty) return;
 
+    setState(() {
+      _isSaving = true;
+    });
+
+    final profileId = _activeProfileId;
+    final shouldSuggestMemory = _selectedChips.any(chipSuggestsMemory);
+
+    try {
+      if (profileId != null) {
+        await _checkinService.saveCheckin(
+          profileId: profileId,
+          chips: _selectedChips.toList(),
+          notes: _notesController.text.trim(),
+        );
+      }
+    } catch (_) {
+      // Local save failure should not block the UX.
+    }
+
+    if (mounted) {
+      setState(() {
+        _isSaving = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Daily check-in saved.')),
+      );
+
+      if (shouldSuggestMemory && profileId != null) {
+        _showMemorySuggestionDialog();
+      } else {
+        _clearForm();
+      }
+    }
+  }
+
+  void _clearForm() {
+    setState(() {
+      _selectedChips.clear();
+      _notesController.clear();
+    });
+  }
+
+  Future<void> _showMemorySuggestionDialog() async {
+    // Build the most specific category from the first flagged chip.
+    final flaggedChip = _selectedChips.firstWhere(
+      chipSuggestsMemory,
+      orElse: () => _selectedChips.first,
+    );
+    final suggestedCategory = chipToMemoryCategory(flaggedChip);
+
+    // Pre-fill the note with only the flagged chips, not unrelated ones.
+    final flaggedChips = _selectedChips.where(chipSuggestsMemory).toList();
+    final preFilledNote = flaggedChips.isNotEmpty
+        ? flaggedChips.join(', ')
+        : _selectedChips.join(', ');
+    final noteController = TextEditingController(text: preFilledNote);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Add to Profile Memory?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'You noted some challenges today. Saving this to memory helps Neu Buddy adapt in the future.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteController,
+                decoration: const InputDecoration(labelText: 'Observation notes'),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Category: $suggestedCategory',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _clearForm();
+              },
+              child: const Text('Skip'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                setState(() => _isSaving = true);
+                try {
+                  await _profileMemoryService.addMemory(
+                    profileId: _activeProfileId!,
+                    category: suggestedCategory,
+                    note: noteController.text,
+                    confidence: 'medium',
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Profile Memory updated.')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to save memory: $e')),
+                    );
+                  }
+                } finally {
+                  if (mounted) setState(() => _isSaving = false);
+                  _clearForm();
+                }
+              },
+              child: const Text('Save to Memory'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   Future<void> _openThemeMenu() async {
     await showModalBottomSheet<void>(
@@ -201,30 +378,6 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
     );
   }
 
-  String get _guideTitle {
-    switch (_selectedGuide) {
-      case 'breathe':
-        return 'Breathe with Buddy';
-      case 'privacy':
-        return 'Privacy & Safety';
-      case 'overview':
-      default:
-        return 'What is AnakUnggul?';
-    }
-  }
-
-  String get _guideBody {
-    switch (_selectedGuide) {
-      case 'breathe':
-        return 'Try this together: inhale for 4, hold for 4, exhale slowly for 6. Repeat three times. Keep your voice soft and your steps simple.';
-      case 'privacy':
-        return 'Camera and microphone are used only during Live Support to help generate calm, real-time guidance. AnakUnggul is a support tool, not a medical diagnosis tool.';
-      case 'overview':
-      default:
-        return 'I am your real-time support companion. When a sensory overload or crisis begins, open the Support tab, turn on camera and microphone, and place the phone nearby. I will listen, observe, and offer short calming guidance to help you and your child through the moment.';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final surfaceColor = Theme.of(context).colorScheme.surface;
@@ -234,7 +387,7 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text('Meet Buddy!'),
+        title: const Text('Daily Check-in'),
         backgroundColor: backgroundColor,
         actions: [
           IconButton(
@@ -334,10 +487,10 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
             child: Column(
               children: [
                 Text(
-                  'Hi! I am Buddy',
+                  'Daily Journal',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 32,
+                    fontSize: 28,
                     fontWeight: FontWeight.w700,
                     color: primaryColor,
                   ),
@@ -349,8 +502,8 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                     return FadeTransition(opacity: animation, child: child);
                   },
                   child: Text(
-                    key: ValueKey<int>(_phraseIndex),
-                    _phrases[_phraseIndex],
+                    key: ValueKey<String>(_phrases.first),
+                    _phrases.first,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       height: 1.5,
@@ -358,37 +511,62 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: NeuroColors.spacingMd - 2),
+                const SizedBox(height: NeuroColors.spacingLg),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: 10,
+                  runSpacing: 10,
                   alignment: WrapAlignment.center,
-                  children: [
-                    _BuddyActionChip(
-                      label: 'How it works',
-                      selected: _selectedGuide == 'overview',
+                  children: _checkInChips.map((chipLabel) {
+                    final isSelected = _selectedChips.contains(chipLabel);
+                    return _BuddyActionChip(
+                      label: chipLabel,
+                      selected: isSelected,
                       onPressed: () {
                         HapticFeedback.lightImpact();
-                        setState(() => _selectedGuide = 'overview');
+                        setState(() {
+                          if (isSelected) {
+                            _selectedChips.remove(chipLabel);
+                          } else {
+                            _selectedChips.add(chipLabel);
+                          }
+                        });
                       },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: NeuroColors.spacingLg),
+                // Optional Note Field
+                TextField(
+                  controller: _notesController,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: 'Any extra notes about today?',
+                    filled: true,
+                    fillColor: surfaceColor,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(NeuroColors.radiusMd),
+                      borderSide: BorderSide.none,
                     ),
-                    _BuddyActionChip(
-                      label: 'Breathe',
-                      selected: _selectedGuide == 'breathe',
-                      onPressed: () {
-                        HapticFeedback.lightImpact();
-                        setState(() => _selectedGuide = 'breathe');
-                      },
+                  ),
+                ),
+                const SizedBox(height: NeuroColors.spacingLg),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: _isSaving 
+                      ? null 
+                      : (_selectedChips.isNotEmpty || _notesController.text.trim().isNotEmpty ? _saveCheckIn : null),
+                    icon: _isSaving 
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.check),
+                    label: Text(_isSaving ? 'Saving...' : 'Save Check-in'),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(NeuroColors.radiusLg),
+                      ),
                     ),
-                    _BuddyActionChip(
-                      label: 'Privacy',
-                      selected: _selectedGuide == 'privacy',
-                      onPressed: () {
-                        HapticFeedback.lightImpact();
-                        setState(() => _selectedGuide = 'privacy');
-                      },
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -397,34 +575,6 @@ class _MascotBuddyScreenState extends State<MascotBuddyScreen>
             const SizedBox(height: NeuroColors.spacingSm),
             const LinearProgressIndicator(minHeight: 3),
           ],
-          AnimatedGlassCard(
-            animation: _entranceController,
-            delay: 0.2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  child: Text(
-                    key: ValueKey<String>(_guideTitle),
-                    _guideTitle,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 22),
-                  ),
-                ),
-                const SizedBox(height: NeuroColors.spacingSm + 2),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  child: Text(
-                    key: ValueKey<String>(_guideBody),
-                    _guideBody,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      height: 1.55,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
