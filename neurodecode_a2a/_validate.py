@@ -64,9 +64,9 @@ def call_a2a(label, text, use_kind=False):
         has_kind = part0.get("kind") == "text"
         check(f"{label} [parts type=text]", has_type)
         check(f"{label} [parts kind=text]", has_kind)
-        # Prompt Opinion currently expects the legacy lowercase task state here.
+        # A2A v1 uses ProtoJSON enum values for task state.
         state = task.get("status", {}).get("state", "")
-        check(f"{label} [status.state=completed]", state == "completed")
+        check(f"{label} [status.state=TASK_STATE_COMPLETED]", state == "TASK_STATE_COMPLETED")
         ok = bool(text_out and len(text_out) > 10)
         check(label, ok)
         if ok:

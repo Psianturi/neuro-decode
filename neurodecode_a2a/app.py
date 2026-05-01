@@ -47,7 +47,7 @@ def _build_task_result(task_id: str, context_id: str, response_text: str) -> dic
     task = {
         "id": task_id,
         "contextId": context_id,
-        "status": {"state": "completed"},
+        "status": {"state": "TASK_STATE_COMPLETED"},
         "artifacts": [{
             "artifactId": "response-1",
             "parts": [artifact_part],
@@ -60,7 +60,7 @@ def _build_task_result(task_id: str, context_id: str, response_text: str) -> dic
     # - result.task wrapper present
     # - duplicated top-level task fields via **task below
     # - parts carrying both type="text" and kind="text"
-    # - status.state using legacy lowercase "completed"
+    # - status.state using A2A v1 ProtoJSON enum values
     # Prompt Opinion appears to require the legacy response discriminator while
     # newer A2A clients expect the wrapper member name.
     return {
