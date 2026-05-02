@@ -6,7 +6,7 @@ Each cycle:
   1. GET /home — parse dashboard
   2. Reply to new comments on NeuroBuddy's own posts
   3. Browse feed — upvote + comment on relevant posts (max 1/cycle)
-  4. Possibly create a new educational post (rate: ~2–3 per day = every 8 hrs)
+  4. Possibly create a new educational post (rate: 3 per day → every 8 hrs)
   5. Mark processed notifications as read
 
 State is stored in a simple in-memory dict (survives per-process restart).
@@ -72,13 +72,13 @@ _SUBMOLTS_TO_SUBSCRIBE = [
 ]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 4
+_POST_INTERVAL_HOURS = 8
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle
-_MAX_REPLIES_PER_CYCLE = 5
+_MAX_REPLIES_PER_CYCLE = 6
 # Max other agents' posts we'll comment on per cycle
-_MAX_EXTERNAL_COMMENTS_PER_CYCLE = 4
+_MAX_EXTERNAL_COMMENTS_PER_CYCLE = 5
 # Moltbook rule: min 20s between comments (established). We use 30s for safety.
 _COMMENT_COOLDOWN_SECONDS = 40
 # Follow a molty once we've upvoted this many of their posts
