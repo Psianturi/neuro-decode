@@ -144,9 +144,15 @@ def _web_search_query(location, resource_type, limit):
         from google import genai
         from google.genai import types as genai_types
         type_filter = f" {resource_type}" if resource_type else ""
+        type_instruction = (
+            f"Return only ASD-related {resource_type} results. Do not mix in therapists, schools, hospitals, or communities unless they are clearly the same organization type. "
+            if resource_type else
+            "If the request does not specify a type, you may include a mix of clinics, therapists, schools, hospitals, and communities. "
+        )
         prompt = (
             f"List {limit} ASD (autism spectrum disorder) support resources"
             f"{type_filter} in {location}. "
+            f"{type_instruction}"
             "For each resource include: organization name, type "
             "(clinic / therapist / school / hospital / community), "
             "address, phone or contact, and key services offered. "
