@@ -56,29 +56,27 @@ def _gemini_call(prompt: str, max_tokens: int = 700) -> str:
 
 def draft_therapist_handover(
     behavior_summary: str,
-    key_triggers: str,
-    effective_interventions: str,
-    session_count: str,
+    key_triggers: str = "unknown",
+    effective_interventions: str = "unknown",
+    session_count: str = "unknown",
 ) -> str:
     """
     Draft a structured clinical handover note for a therapist or psychiatrist appointment.
+    Call this tool IMMEDIATELY. Extract all details from the caregiver's message and use
+    'unknown' for anything not mentioned. Never ask for more information before calling.
 
     This bridges the gap between caregiver daily observations and clinical consultations
     — turning raw behavioral descriptions into a professional, structured briefing that
     a clinician can act on immediately.
 
     Args:
-        behavior_summary: Plain-text description of the child's recent behavioral patterns.
-                          Example: 'Increased meltdowns over last 2 weeks, mostly in the
-                          afternoon. Hitting and biting more frequent. Sleep disrupted.'
-        key_triggers: Comma-separated list of known or suspected triggers.
-                      Example: 'loud noise, denied requests, transitions, hunger, fatigue'
-        effective_interventions: Interventions or strategies that have been working.
-                                 Example: 'deep pressure vest, noise-cancelling headphones,
-                                 5-minute warning before transitions, visual schedule'
-        session_count: Number of live sessions or observations this is based on.
-                       Example: '8 sessions over 3 weeks'. Use 'unknown' if not sure.
-                       Default: 'unknown'.
+        behavior_summary: Extract directly from the caregiver's message. Include all
+                          behavioral patterns and observations they described.
+        key_triggers: Infer from the caregiver's message (e.g. transitions, loud noise).
+                      Use 'unknown' if no triggers were mentioned.
+        effective_interventions: Extract from caregiver's message (e.g. deep pressure).
+                                 Use 'unknown' if no interventions were mentioned.
+        session_count: Use 'unknown' if the caregiver did not state a session count.
 
     Returns:
         A structured clinical handover note in plain text, ready to share with a therapist.
@@ -104,26 +102,24 @@ def draft_therapist_handover(
 
 def assess_caregiver_wellbeing(
     stress_indicators: str,
-    support_system: str,
-    sleep_quality: str,
+    support_system: str = "none described",
+    sleep_quality: str = "unknown",
 ) -> str:
     """
     Assess caregiver wellbeing and provide personalized self-care and support guidance.
+    Call this tool IMMEDIATELY with whatever the caregiver shared. Never ask for more
+    information before calling — use 'none described' or 'unknown' for missing fields.
 
     Caregiver burnout is a major risk factor for child outcomes in ASD families.
     This tool screens for warning signs and provides actionable, empathetic guidance —
     addressing the whole family system, not just the child.
 
     Args:
-        stress_indicators: Description of current stress or burnout signs the caregiver notices.
-                           Example: 'Feeling exhausted all the time, snapping at the child more
-                           often, no longer enjoying activities I used to like, crying more.'
-        support_system: Description of the caregiver's current support network.
-                        Example: 'Spouse is helpful but working long hours. No family nearby.
-                        Have a therapist but sessions are monthly.'
-                        Use 'none described' if not mentioned.
-        sleep_quality: Brief description of caregiver's sleep.
-                       Example: '5-6 hours broken by child waking up'. Use 'unknown' if not shared.
+        stress_indicators: Extract directly from the caregiver's message.
+        support_system: Extract from the caregiver's message if mentioned.
+                        Use 'none described' if the caregiver did not mention support.
+        sleep_quality: Extract from the caregiver's message if mentioned.
+                       Use 'unknown' if the caregiver did not mention sleep.
 
     Returns:
         A warm, structured wellbeing assessment with immediate self-care actions and resources.
@@ -147,24 +143,24 @@ def assess_caregiver_wellbeing(
 
 def get_sensory_diet_plan(
     sensory_profile: str,
-    child_age: str,
-    environment: str,
+    child_age: str = "unknown",
+    environment: str = "home",
 ) -> str:
     """
     Generate a personalized sensory diet plan based on the child's sensory profile.
+    Call this tool IMMEDIATELY with what the caregiver described. Never ask for more
+    information before calling — use defaults for any missing fields.
 
     A sensory diet is a structured set of sensory input activities prescribed by
     occupational therapists to help children with ASD self-regulate throughout the day.
     This tool generates an evidence-based starting plan tailored to the child.
 
     Args:
-        sensory_profile: Description of the child's sensory sensitivities and seeking behaviors.
-                         Example: 'Seeks deep pressure and proprioceptive input. Hypersensitive
-                         to sound and light touch. Avoids crowds. Loves jumping and spinning.'
-        child_age: Age or age range of the child.
-                   Example: '7', '4-6', 'teenager (14)'. Use 'unknown' if not specified.
-        environment: Primary environment where the plan will be used.
-                     Example: 'home on weekdays', 'school classroom', 'both home and school'.
+        sensory_profile: Extract directly from the caregiver's message.
+        child_age: Extract from the caregiver's message if stated.
+                   Use 'unknown' if the caregiver did not mention the child's age.
+        environment: Infer from context (e.g. 'setelah pulang sekolah' → 'home after school').
+                     Use 'home' as default if environment is unclear.
 
     Returns:
         A structured daily sensory diet plan with morning, midday, and evening activity sets.

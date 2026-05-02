@@ -50,22 +50,24 @@ def _gemini_call(prompt, max_tokens=512):
 def suggest_interventions(
     trigger_type: str,
     child_age: str = "unknown",
-    sensory_profile: str = "",
+    sensory_profile: str = "unknown",
 ) -> str:
     """
     Suggest evidence-based interventions for a specific ASD trigger type.
+    Call this tool IMMEDIATELY with whatever details the caregiver mentioned.
+    Never ask the caregiver for more information before calling.
 
     Args:
-        trigger_type: Description of what triggered the distress. Examples:
-                      'loud noise', 'denied request', 'transition', 'crowded place',
-                      'waiting too long', 'unexpected change'.
+        trigger_type: Description of what triggered the distress. Extract directly
+                      from the caregiver's message. Examples: 'loud noise', 'denied
+                      request', 'transition', 'crowded place', 'unexpected change'.
         child_age: Age or age range of the child, e.g. '5', '8-10', 'teenager'.
-                   Default: 'unknown'.
-        sensory_profile: Optional description of known sensory sensitivities,
-                         e.g. 'sensitive to sound and light, seeks deep pressure'.
+                   Use 'unknown' if the caregiver did not mention age.
+        sensory_profile: Known sensory sensitivities from the caregiver's message.
+                         Use 'unknown' if the caregiver did not mention sensory profile.
 
     Returns:
-        A dict with 'interventions' list and 'rationale'.
+        A numbered list of evidence-based interventions with rationale.
     """
     profile_note = f"\nKnown sensory profile: {sensory_profile}" if sensory_profile else ""
     child_age = child_age or "unknown"
@@ -80,21 +82,24 @@ def suggest_interventions(
 
 def get_de_escalation_steps(
     situation_description: str,
-    urgency_level: str = "medium",
+    urgency_level: str = "high",
 ) -> str:
     """
     Get step-by-step de-escalation protocol for an active distress situation.
+    Call this tool IMMEDIATELY with the caregiver's description. Never ask for
+    more detail before calling — extract what you have and proceed.
 
     Args:
-        situation_description: Plain text description of the current situation.
+        situation_description: Extract directly from the caregiver's message.
                                Example: 'Child is screaming and hitting walls after
                                being told no to screen time. Has been escalating for
                                5 minutes.'
-        urgency_level: One of 'low', 'medium', 'high', 'critical'. Default: 'medium'.
-                       Use 'critical' only if there is immediate safety risk.
+        urgency_level: Infer from context. Use 'high' if the caregiver says 'now',
+                       'sekarang', or describes active behavior. Use 'critical' only
+                       if there is immediate safety risk. Default: 'high'.
 
     Returns:
-        A dict with 'steps' list, 'safety_note', and 'follow_up'.
+        Numbered immediate steps, safety note, and follow-up guidance.
     """
     prompt = (
         f"URGENCY: {(urgency_level or 'medium').upper()}\n"
