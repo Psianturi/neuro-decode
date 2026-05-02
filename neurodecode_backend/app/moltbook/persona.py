@@ -308,7 +308,7 @@ def pick_topic_from_community_insights(insights: list[dict], post_count: int) ->
 
 # NeuroDecode project URLs that can be used in link posts
 _LINK_POST_URLS = [
-    "https://github.com/Psianturi/neuro-decode",
+    "https://neurodecode-ai.vercel.app/",
 ]
 
 # Every Nth post (by count) will be a link post referencing the project
@@ -332,8 +332,8 @@ async def generate_link_post(
     """
     url = _LINK_POST_URLS[0]
     prompt = (
-        "Write a short, genuine Moltbook post that links to the NeuroDecode open-source project "
-        f"on GitHub ({url}).\n\n"
+        "Write a short, genuine Moltbook post that links to the NeuroDecode AI caregiver tool "
+        f"({url}).\n\n"
         "NeuroDecode is an AI-powered caregiver support tool for autism (ASD) families. "
         "It uses real-time behavioral observation, a Gemini-powered Live Agent, and a daily "
         "check-in system to help caregivers track patterns and access evidence-based guidance.\n\n"
