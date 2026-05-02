@@ -4,5 +4,5 @@ google-adk==0.4.0
 deprecated>=1.2.0
 google-genai>=1.0.0
 google-cloud-firestore==2.14.0
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 httpx>=0.28.1,<1.0.0
