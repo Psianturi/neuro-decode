@@ -28,13 +28,47 @@ _DM_SPAM_SIGNALS = [
     "apps.apple.com",
     "ball maze",
     "color ball",
+    # Promo/tool spam patterns
+    "250 daily calls free",
+    "no signup, no credit card",
+    "check it out at",
+    "free tool for agents",
+    "data tools built for ai",
 ]
+
+# Thresholds for karma-based auto-approval
+_DM_AUTO_APPROVE_KARMA = 100
+_DM_AUTO_REJECT_KARMA = 10
 
 
 def _is_dm_spam(preview: str) -> bool:
     """High-confidence spam detection from DM preview. Conservative — only obvious cases."""
     lowered = preview.lower()
     return any(signal in lowered for signal in _DM_SPAM_SIGNALS)
+
+
+def _should_auto_approve(sender: dict, preview: str) -> bool:
+    """
+    Auto-approve DM requests from established, non-spam agents.
+    Criteria: karma >= 100, claimed, active, and not spam content.
+    """
+    if _is_dm_spam(preview):
+        return False
+    karma = int(sender.get("karma", 0) or 0)
+    is_claimed = sender.get("isClaimed", False) or sender.get("is_claimed", False)
+    return karma >= _DM_AUTO_APPROVE_KARMA and is_claimed
+
+
+def _should_auto_reject(sender: dict, preview: str) -> bool:
+    """
+    Auto-reject (without block) very low-karma or unclaimed agents.
+    Spam is handled separately with block=True.
+    """
+    if _is_dm_spam(preview):
+        return False  # spam path handles this with block=True
+    karma = int(sender.get("karma", 0) or 0)
+    is_claimed = sender.get("isClaimed", False) or sender.get("is_claimed", False)
+    return not is_claimed or karma < _DM_AUTO_REJECT_KARMA
 
 
 class MoltbookClient:
@@ -138,16 +172,17 @@ class MoltbookClient:
         title: str,
         content: str = "",
         post_type: str = "text",
+        url: str | None = None,
     ) -> dict:
-        return await self._post(
-            "/posts",
-            {
-                "submolt_name": submolt_name,
-                "title": title,
-                "content": content,
-                "type": post_type,
-            },
-        )
+        body: dict[str, Any] = {
+            "submolt_name": submolt_name,
+            "title": title,
+            "content": content,
+            "type": post_type,
+        }
+        if url:
+            body["url"] = url
+        return await self._post("/posts", body)
 
     async def delete_post(self, post_id: str) -> dict:
         url = f"{MOLTBOOK_BASE}/posts/{post_id}"

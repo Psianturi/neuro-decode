@@ -25,11 +25,14 @@ from app.moltbook.persona import (
     generate_comment_on_post,
     generate_dm_reply,
     generate_introduction,
+    generate_link_post,
     generate_post,
     generate_reply,
     extract_community_insight,
     is_relevant_post,
     pick_next_topic,
+    pick_topic_from_community_insights,
+    should_make_link_post,
 )
 from app.moltbook.agents.orchestrator import AgentOrchestrator, PipelineContext
 from app.moltbook.agents.community_store import save_insight
@@ -72,7 +75,7 @@ _SUBMOLTS_TO_SUBSCRIBE = [
 ]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 8
+_POST_INTERVAL_HOURS = 7
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle
@@ -157,7 +160,7 @@ async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
     - Pending requests: auto-reject high-confidence spam (with block), log others.
     - Unread messages in approved convos: auto-reply with Gemini.
     """
-    from app.moltbook.moltbook_client import _is_dm_spam
+    from app.moltbook.moltbook_client import _is_dm_spam, _should_auto_approve, _should_auto_reject
 
     # Fast check via /agents/dm/check — avoids extra API calls if nothing to do
     try:
@@ -175,7 +178,7 @@ async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
     if not pending_count and not unread_count:
         return
 
-    # Pending requests: auto-reject spam, log legitimate ones
+    # Pending requests: auto-approve/reject based on karma + spam signals
     if pending_count:
         try:
             reqs_resp = await client.dm_requests()
@@ -184,7 +187,8 @@ async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
                 req_id = req.get("conversation_id", "")
                 if not req_id:
                     continue
-                from_name = req.get("from", {}).get("name", "unknown")
+                sender = req.get("from", {})
+                from_name = sender.get("name", "unknown")
                 preview = req.get("message_preview", "")
 
                 # Auto-reject high-confidence spam with block
@@ -197,6 +201,30 @@ async def _run_dm_check(home: dict, client: MoltbookClient, model: str) -> None:
                         )
                     except Exception as exc:
                         logger.warning("[Moltbook] Spam reject failed %s: %s", req_id, exc)
+                    continue
+
+                # Auto-approve established agents (karma >= 100, claimed, not spam)
+                if _should_auto_approve(sender, preview):
+                    try:
+                        await client.dm_approve_request(req_id)
+                        logger.info(
+                            "[Moltbook] Auto-approved DM from %s (karma=%s, id=%s)",
+                            from_name, sender.get("karma", "?"), req_id,
+                        )
+                    except Exception as exc:
+                        logger.warning("[Moltbook] Auto-approve failed %s: %s", req_id, exc)
+                    continue
+
+                # Auto-reject very low-karma / unclaimed agents (without block)
+                if _should_auto_reject(sender, preview):
+                    try:
+                        await client.dm_reject_request(req_id, block=False)
+                        logger.info(
+                            "[Moltbook] Auto-rejected low-karma DM from %s (karma=%s, id=%s)",
+                            from_name, sender.get("karma", "?"), req_id,
+                        )
+                    except Exception as exc:
+                        logger.warning("[Moltbook] Auto-reject failed %s: %s", req_id, exc)
                     continue
 
                 # Legitimate request — log for human review
@@ -762,20 +790,42 @@ async def run_heartbeat_tick(
         # else: hours_since_post stays 0.0 → skip post this cycle
 
     if hours_since_post >= _POST_INTERVAL_HOURS:
-        # Use insight from pipeline if available, else fall back to topic rotation
+        # Use insight from pipeline if available, else try community_insights, else topic rotation
         if pipeline_ctx is not None and pipeline_ctx.insight is not None:
             topic = pipeline_ctx.insight.topic
             submolt = pipeline_ctx.insight.suggested_submolt
         else:
-            topic = pick_next_topic(_state["post_count"])
+            # Fallback: derive topic from recent Moltbook community harvest
+            community_insights: list[dict] = []
+            if firestore_project:
+                try:
+                    from app.moltbook.agents.community_store import list_recent
+                    community_insights = await list_recent(firestore_project, limit=10)
+                except Exception as exc:
+                    logger.warning("[Moltbook] community_insights fetch failed: %s", exc)
+            topic = pick_topic_from_community_insights(community_insights, _state["post_count"])
             submolt = "general"
         try:
-            title, body = await generate_post(
-                topic=topic,
-                model=model,
-                insight=pipeline_ctx.insight if pipeline_ctx else None,
-                persona_system_addendum=pipeline_ctx.persona_system_addendum if pipeline_ctx else "",
-            )
+            post_url: str | None = None
+            post_type: str = "text"
+
+            # Every 5th post: generate a link post to the NeuroDecode project
+            if should_make_link_post(_state["post_count"] + 1):
+                link_title, link_body, post_url = await generate_link_post(
+                    post_count=_state["post_count"] + 1,
+                    model=model,
+                )
+                title, body = link_title, link_body
+                post_type = "link"
+                submolt = "general"
+                logger.info("[Moltbook] Using link post for post #%d", _state["post_count"] + 1)
+            else:
+                title, body = await generate_post(
+                    topic=topic,
+                    model=model,
+                    insight=pipeline_ctx.insight if pipeline_ctx else None,
+                    persona_system_addendum=pipeline_ctx.persona_system_addendum if pipeline_ctx else "",
+                )
             # ReviewAgent quality gate
             if orchestrator is not None and pipeline_ctx is not None:
                 verdict = await orchestrator.review_draft(
@@ -804,6 +854,8 @@ async def run_heartbeat_tick(
                 submolt_name=submolt,
                 title=title,
                 content=body,
+                post_type=post_type,
+                url=post_url,
             )
             ok = await handle_verification(resp, model, client)
             if ok:
