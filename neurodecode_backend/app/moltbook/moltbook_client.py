@@ -171,18 +171,15 @@ class MoltbookClient:
         submolt_name: str,
         title: str,
         content: str = "",
-        post_type: str = "text",
-        url: str | None = None,
     ) -> dict:
-        body: dict[str, Any] = {
-            "submolt_name": submolt_name,
-            "title": title,
-            "content": content,
-            "type": post_type,
-        }
-        if url:
-            body["url"] = url
-        return await self._post("/posts", body)
+        return await self._post(
+            "/posts",
+            {
+                "submolt_name": submolt_name,
+                "title": title,
+                "content": content,
+            },
+        )
 
     async def delete_post(self, post_id: str) -> dict:
         url = f"{MOLTBOOK_BASE}/posts/{post_id}"

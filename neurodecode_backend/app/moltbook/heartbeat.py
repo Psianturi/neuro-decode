@@ -25,14 +25,12 @@ from app.moltbook.persona import (
     generate_comment_on_post,
     generate_dm_reply,
     generate_introduction,
-    generate_link_post,
     generate_post,
     generate_reply,
     extract_community_insight,
     is_relevant_post,
     pick_next_topic,
     pick_topic_from_community_insights,
-    should_make_link_post,
 )
 from app.moltbook.agents.orchestrator import AgentOrchestrator, PipelineContext
 from app.moltbook.agents.community_store import save_insight
@@ -75,7 +73,7 @@ _SUBMOLTS_TO_SUBSCRIBE = [
 ]
 
 # Minimum hours between proactive posts (API-guarded to survive cold start)
-_POST_INTERVAL_HOURS = 7
+_POST_INTERVAL_HOURS = 6
 # Moltbook rule: max 50 comments/day (established agent). 
 _MAX_COMMENTS_PER_DAY = 32
 # Max NEW comments from others we'll reply to per cycle
@@ -83,7 +81,7 @@ _MAX_REPLIES_PER_CYCLE = 6
 # Max other agents' posts we'll comment on per cycle
 _MAX_EXTERNAL_COMMENTS_PER_CYCLE = 5
 # Moltbook rule: min 20s between comments (established). We use 30s for safety.
-_COMMENT_COOLDOWN_SECONDS = 40
+_COMMENT_COOLDOWN_SECONDS = 50
 # Follow a molty once we've upvoted this many of their posts
 _FOLLOW_UPVOTE_THRESHOLD = 3
 
@@ -530,12 +528,13 @@ async def run_heartbeat_tick(
     # ------------------------------------------------------------------
     # 1. GET /home — check notifications & activity on own posts
     # ------------------------------------------------------------------
+    home: dict = {}
     try:
         home = await client.home()
     except Exception as exc:
-        logger.error("[Moltbook] /home failed: %s", exc)
+        logger.warning("[Moltbook] /home failed (degraded mode — skipping notifications): %s", exc)
         summary["errors"].append(f"home: {exc}")
-        return summary
+        # Don't abort — skip notification/reply phase and go straight to post check
 
     activity_on_posts: list[dict] = home.get("activity_on_your_posts", [])
 
@@ -806,26 +805,12 @@ async def run_heartbeat_tick(
             topic = pick_topic_from_community_insights(community_insights, _state["post_count"])
             submolt = "general"
         try:
-            post_url: str | None = None
-            post_type: str = "text"
-
-            # Every 5th post: generate a link post to the NeuroDecode project
-            if should_make_link_post(_state["post_count"] + 1):
-                link_title, link_body, post_url = await generate_link_post(
-                    post_count=_state["post_count"] + 1,
-                    model=model,
-                )
-                title, body = link_title, link_body
-                post_type = "link"
-                submolt = "general"
-                logger.info("[Moltbook] Using link post for post #%d", _state["post_count"] + 1)
-            else:
-                title, body = await generate_post(
-                    topic=topic,
-                    model=model,
-                    insight=pipeline_ctx.insight if pipeline_ctx else None,
-                    persona_system_addendum=pipeline_ctx.persona_system_addendum if pipeline_ctx else "",
-                )
+            title, body = await generate_post(
+                topic=topic,
+                model=model,
+                insight=pipeline_ctx.insight if pipeline_ctx else None,
+                persona_system_addendum=pipeline_ctx.persona_system_addendum if pipeline_ctx else "",
+            )
             # ReviewAgent quality gate
             if orchestrator is not None and pipeline_ctx is not None:
                 verdict = await orchestrator.review_draft(
@@ -854,8 +839,6 @@ async def run_heartbeat_tick(
                 submolt_name=submolt,
                 title=title,
                 content=body,
-                post_type=post_type,
-                url=post_url,
             )
             ok = await handle_verification(resp, model, client)
             if ok:

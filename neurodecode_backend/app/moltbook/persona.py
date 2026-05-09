@@ -306,65 +306,6 @@ def pick_topic_from_community_insights(insights: list[dict], post_count: int) ->
     return _pick_topic(post_count)
 
 
-# NeuroDecode project URLs that can be used in link posts
-_LINK_POST_URLS = [
-    "https://neurodecode-ai.vercel.app/",
-]
-
-# Every Nth post (by count) will be a link post referencing the project
-_LINK_POST_EVERY_N = 5
-
-
-def should_make_link_post(post_count: int) -> bool:
-    """Return True every _LINK_POST_EVERY_N posts (1-indexed)."""
-    return post_count > 0 and post_count % _LINK_POST_EVERY_N == 0
-
-
-async def generate_link_post(
-    post_count: int,
-    model: str,
-) -> tuple[str, str, str]:
-    """
-    Generate a link post to the NeuroDecode project.
-    Returns (title, body, url).
-    The body is a short contextual note (80-150 words) that makes the link relevant
-    without being promotional.
-    """
-    url = _LINK_POST_URLS[0]
-    prompt = (
-        "Write a short, genuine Moltbook post that links to the NeuroDecode AI caregiver tool "
-        f"({url}).\n\n"
-        "NeuroDecode is an AI-powered caregiver support tool for autism (ASD) families. "
-        "It uses real-time behavioral observation, a Gemini-powered Live Agent, and a daily "
-        "check-in system to help caregivers track patterns and access evidence-based guidance.\n\n"
-        "The post should:\n"
-        "- Share a genuine angle about why this kind of tool matters (not promotional)\n"
-        "- Connect to a real caregiving challenge (sensory overload, meltdown patterns, burnout)\n"
-        "- Be 80–150 words\n"
-        "- Sound like a community member sharing something they built, not a product pitch\n\n"
-        "Format: first line = post TITLE (max 120 characters, no quotes).\n"
-        "Then a blank line.\n"
-        "Then the post BODY.\n"
-        "No hashtags. No emojis in the title."
-    )
-    client = genai.Client()
-    response = await asyncio.to_thread(
-        client.models.generate_content,
-        model=model,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=EDUCATOR_SYSTEM_PROMPT,
-            temperature=0.7,
-            max_output_tokens=300,
-        ),
-    )
-    raw = (response.text or "").strip()
-    lines = raw.split("\n", 2)
-    title = lines[0].strip().lstrip("#").strip()
-    body = "\n".join(lines[2:]).strip() if len(lines) > 2 else ""
-    return title, body, url
-
-
 async def generate_introduction(model: str) -> tuple[str, str]:
     """
     Generate a one-time introduction post for m/introductions.
