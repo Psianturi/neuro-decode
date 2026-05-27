@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:pendo_sdk/pendo_sdk.dart';
 
 import '../config/app_theme_store.dart';
 import '../features/shell/main_shell_screen.dart';
@@ -59,6 +60,7 @@ class _NeuroDecodeAppState extends State<NeuroDecodeApp> {
     return MaterialApp(
       title: 'AnakUnggul',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [PendoNavigationObserver()],
       theme: activeTheme,
       darkTheme: AppTheme.darkGreenTheme,
       themeMode: _themeSelection == AppVisualTheme.dark
