@@ -47,5 +47,16 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Used to detect your city and show nearby ASD resources in Find Help.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>pendo-40da3a81-8dea-47d6-8099-f25e18ba3fdf</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
