@@ -24,6 +24,7 @@ from app.clinical_store import ClinicalStore
 from app.a2a_client import call_skill as _a2a_call_skill
 from app.settings import get_settings
 from app.auth import get_ws_uid
+from app.auth_alert import AuthDenialAlertMiddleware
 from app.state import (
     settings as _startup_settings,
     session_store,
@@ -52,6 +53,12 @@ app.include_router(_notifications_router.router, prefix="/notifications", tags=[
 app.include_router(_profiles_router.router, prefix="/profiles", tags=["profiles"])
 app.include_router(_devices_router.router, prefix="/devices", tags=["devices"])
 app.include_router(_account_router.router, prefix="/account", tags=["account"])
+
+app.add_middleware(
+    AuthDenialAlertMiddleware,
+    bot_token=_startup_settings.telegram_bot_token,
+    chat_id=_startup_settings.telegram_chat_id,
+)
 
 IDLE_TIMEOUT_SECONDS = 120
 AUDIO_OBSERVER_COOLDOWN_SECONDS = 4
