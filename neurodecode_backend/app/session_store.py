@@ -285,82 +285,20 @@ class SessionStore:
             print(f"[session_store] mark_followup_sent failed: {e}")
             return False
 
-    def _get_session_firestore(self, session_id: str) -> dict[str, object] | None:
+    def _rate_session_firestore(self, session_id: str, rating: int) -> None:
         client = self._get_client()
         if client is None:
             raise RuntimeError("Firestore client unavailable")
-        doc = client.collection(self._firestore_collection).document(session_id).get()
-        if not doc.exists:
-            return None
-        data = dict(doc.to_dict() or {})
-        data["id"] = doc.id
-        return data
+        client.collection(self._firestore_collection).document(session_id).set(
+            {"caregiver_rating": rating},
+            merge=True,
+        )
 
-    async def get_session(self, session_id: str) -> dict[str, object] | None:
-        """Fetch a single session by id (Firestore doc id == session_id)."""
-        if self._firestore_enabled:
-            try:
-                doc = await asyncio.to_thread(self._get_session_firestore, session_id)
-                if doc is not None:
-                    return doc
-            except Exception as e:
-                print(f"[session_store] get_session failed; using memory fallback: {e}")
-
-        async with self._memory_lock:
-            for item in self._memory:
-                if str(item.get("session_id")) == session_id:
-                    return dict(item)
-        return None
-
-    def _rate_session_firestore(self, session_id: str, rating: int, user_id: str | None) -> str:
-        """Returns 'ok' | 'not_found' | 'forbidden'. Ownership check + write happen
-        in one transaction so a concurrent rate call can't race between them."""
-        client = self._get_client()
-        if client is None:
-            raise RuntimeError("Firestore client unavailable")
-        doc_ref = client.collection(self._firestore_collection).document(session_id)
-
-        @firestore.transactional
-        def _txn(transaction) -> str:
-            snapshot = doc_ref.get(transaction=transaction)
-            if not snapshot.exists:
-                return "not_found"
-            data = snapshot.to_dict() or {}
-            if user_id is not None and data.get("user_id") != user_id:
-                return "forbidden"
-            transaction.update(doc_ref, {"caregiver_rating": rating})
-            return "ok"
-
-        txn = client.transaction()
-        return _txn(txn)
-
-    async def rate_session(
-        self,
-        session_id: str,
-        rating: int,
-        *,
-        user_id: str | None = None,
-    ) -> str:
-        """Persist a 1-5 caregiver rating on a session document, enforcing
-        ownership when user_id is given. Returns 'ok' | 'not_found' | 'forbidden'."""
-        if self._firestore_enabled:
-            try:
-                result = await asyncio.to_thread(
-                    self._rate_session_firestore, session_id, rating, user_id
-                )
-                if result != "not_found":
-                    return result
-            except Exception as e:
-                print(f"[session_store] rate_session failed: {e}")
-
-        async with self._memory_lock:
-            for idx, item in enumerate(self._memory):
-                if str(item.get("session_id")) != session_id:
-                    continue
-                if user_id is not None and item.get("user_id") != user_id:
-                    return "forbidden"
-                updated = dict(item)
-                updated["caregiver_rating"] = rating
-                self._memory[idx] = updated
-                return "ok"
-        return "not_found"
+    async def rate_session(self, session_id: str, rating: int) -> None:
+        """Persist a 1–5 caregiver rating on a session document. Best-effort."""
+        if not self._firestore_enabled:
+            return
+        try:
+            await asyncio.to_thread(self._rate_session_firestore, session_id, rating)
+        except Exception as e:
+            print(f"[session_store] rate_session failed: {e}")

@@ -120,33 +120,25 @@ class NotificationStore:
                 break
         return out[:limit]
 
-    def _mark_read_firestore(self, notification_id: str, user_id: str | None) -> str:
-        """Returns 'ok' | 'not_found' | 'forbidden'. Ownership check + write happen
-        in one transaction so a concurrent mark-read call can't race between them."""
+    def _mark_read_firestore(self, notification_id: str) -> bool:
         client = self._get_client()
         if client is None:
             raise RuntimeError("Firestore client unavailable")
 
         doc_ref = client.collection(self._notification_collection).document(notification_id)
+        snapshot = doc_ref.get()
+        if not snapshot.exists:
+            return False
 
-        @firestore.transactional
-        def _txn(transaction) -> str:
-            snapshot = doc_ref.get(transaction=transaction)
-            if not snapshot.exists:
-                return "not_found"
-            data = snapshot.to_dict() or {}
-            if user_id is not None and data.get("user_id") != user_id:
-                return "forbidden"
-            now = datetime.now(timezone.utc).isoformat()
-            transaction.set(
-                doc_ref,
-                {"status": "read", "read_at_utc": now, "updated_at_utc": now},
-                merge=True,
-            )
-            return "ok"
-
-        txn = client.transaction()
-        return _txn(txn)
+        doc_ref.set(
+            {
+                "status": "read",
+                "read_at_utc": datetime.now(timezone.utc).isoformat(),
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            },
+            merge=True,
+        )
+        return True
 
     async def add_many(self, records: list[dict[str, object]]) -> list[dict[str, object]]:
         if not records:
@@ -209,42 +201,29 @@ class NotificationStore:
             ]
             return filtered[:limit]
 
-    async def _mark_read_memory(self, notification_id: str, *, user_id: str | None) -> str:
-        """Returns 'ok' | 'not_found' | 'forbidden'."""
+    async def mark_read(self, notification_id: str, *, user_id: str | None = None) -> bool:
+        updated = False
         async with self._memory_lock:
             for idx, item in enumerate(self._memory):
                 if str(item.get("notification_id")) != notification_id:
                     continue
-                if user_id is not None and item.get("user_id") != user_id:
-                    return "forbidden"
-                if str(item.get("status") or "") != "read":
-                    updated_item = dict(item)
-                    updated_item["status"] = "read"
-                    updated_item["read_at_utc"] = datetime.now(timezone.utc).isoformat()
-                    updated_item["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-                    self._memory[idx] = updated_item
-                return "ok"
-        return "not_found"
+                if user_id and item.get("user_id") != user_id:
+                    continue
+                if str(item.get("status") or "") == "read":
+                    return True
+                updated_item = dict(item)
+                updated_item["status"] = "read"
+                updated_item["read_at_utc"] = datetime.now(timezone.utc).isoformat()
+                updated_item["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+                self._memory[idx] = updated_item
+                updated = True
+                break
 
-    async def mark_read(self, notification_id: str, *, user_id: str | None = None) -> str:
-        """Mark a notification read, enforcing ownership when user_id is given.
-        Returns 'ok' | 'not_found' | 'forbidden'."""
         if self._firestore_enabled:
             try:
-                result = await asyncio.to_thread(
-                    self._mark_read_firestore, notification_id, user_id
-                )
+                firestore_updated = await asyncio.to_thread(self._mark_read_firestore, notification_id)
+                updated = updated or firestore_updated
             except Exception as e:
                 print(f"[notification_store] Firestore mark-read failed: {e}")
-                result = None
 
-            if result == "ok":
-                # Firestore already enforced ownership; mirror into the memory
-                # cache unconditionally so it stays consistent with the source of truth.
-                await self._mark_read_memory(notification_id, user_id=None)
-                return "ok"
-            if result == "forbidden":
-                return "forbidden"
-            # "not_found", or the Firestore call raised — fall through to memory.
-
-        return await self._mark_read_memory(notification_id, user_id=user_id)
+        return updated

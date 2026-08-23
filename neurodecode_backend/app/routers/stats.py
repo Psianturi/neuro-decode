@@ -71,6 +71,7 @@ class SessionHistoryItem(BaseModel):
     resolved: bool
     emotion_state: str | None = None
     severity_level: int | None = None
+    ai_summary: str | None = None
     caregiver_notified: bool = False
 
 
@@ -360,6 +361,7 @@ async def get_stats_summary(limit: int = 500) -> InsightsSummary:
             resolved=_is_resolved(s),
             emotion_state=None,
             severity_level=None,
+            ai_summary=(s.get("structured") or {}).get("title") or s.get("summary_text"),
             caregiver_notified=_is_caregiver_notified(s),
         )
         for s in sorted_sessions
