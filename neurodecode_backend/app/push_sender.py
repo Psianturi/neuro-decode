@@ -4,11 +4,11 @@ import asyncio
 from typing import Any
 
 try:
-    import firebase_admin
     from firebase_admin import messaging
 except Exception:
-    firebase_admin = None
     messaging = None
+
+from app.firebase_admin_init import ensure_firebase_admin_initialized
 
 
 class PushSender:
@@ -21,17 +21,15 @@ class PushSender:
     def _ensure_initialized(self) -> bool:
         if not self._enabled:
             return False
-        if firebase_admin is None or messaging is None:
+        if messaging is None:
             print("[push_sender] firebase_admin not installed; push disabled")
             return False
         if self._initialized:
             return True
 
         try:
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app()
-            self._initialized = True
-            return True
+            self._initialized = ensure_firebase_admin_initialized()
+            return self._initialized
         except Exception as e:
             print(f"[push_sender] init failed: {e}")
             return False
