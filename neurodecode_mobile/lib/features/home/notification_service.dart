@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../../config/app_config.dart';
 import '../../config/app_identity_store.dart';
+import '../../config/auth_identity.dart';
 
 class NotificationItem {
   const NotificationItem({
@@ -51,20 +52,20 @@ class NotificationItem {
 }
 
 class NotificationService {
-  NotificationService({AppIdentityStore? identityStore})
-      : _identityStore = identityStore ?? AppIdentityStore();
+  NotificationService({AppIdentityStore? identityStore, AuthIdentity? authIdentity})
+      : _identityStore = identityStore ?? AppIdentityStore(),
+        _authIdentity = authIdentity ?? AuthIdentity();
 
   final AppIdentityStore _identityStore;
+  final AuthIdentity _authIdentity;
 
   Future<Uri> _buildUri(
     String path, {
     Map<String, String>? extraQuery,
   }) async {
-    final userId = await _identityStore.getOrCreateUserId();
     final profileId = await _identityStore.getActiveProfileId();
 
     final query = <String, String>{
-      'user_id': userId,
       if (profileId != null && profileId.isNotEmpty) 'profile_id': profileId,
       ...?extraQuery,
     };
@@ -82,8 +83,10 @@ class NotificationService {
     client.connectionTimeout = const Duration(seconds: 10);
 
     try {
+      final token = await _authIdentity.getIdToken();
       final request = await client.openUrl(method, uri);
       request.headers.contentType = ContentType.json;
+      request.headers.set('authorization', 'Bearer $token');
 
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();

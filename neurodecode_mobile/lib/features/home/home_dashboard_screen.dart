@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../config/app_identity_store.dart';
+import '../../config/auth_identity.dart';
 import 'history_insights_screen.dart';
 import 'notification_service.dart';
 import 'notifications_center_screen.dart';
@@ -325,6 +326,31 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         ),
                   ),
                 ],
+              ),
+              ValueListenableBuilder<MigrationState>(
+                valueListenable: AuthIdentity.migrationState,
+                builder: (context, state, _) {
+                  if (state != MigrationState.pending) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: NeuroColors.spacingSm),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: NeuroColors.spacingSm),
+                        Text(
+                          'Menyinkronkan data sebelumnya...',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: NeuroColors.spacingMd),
               const _BrandHeaderCard(),

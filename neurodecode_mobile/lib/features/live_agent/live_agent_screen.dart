@@ -12,9 +12,11 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../config/app_config.dart';
+import '../../config/auth_identity.dart';
 import '../../theme/app_theme.dart';
 import 'observer_panel_sheet.dart';
 
@@ -56,6 +58,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSub;
   AgentState _state = AgentState.idle;
+  final AuthIdentity _authIdentity = AuthIdentity();
 
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micStreamSub;
@@ -194,7 +197,7 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     });
   }
 
-  void _connect() {
+  Future<void> _connect() async {
     if (_isConnected) return;
     _isManualClose = false;
     _backendFatalError = false;
@@ -205,7 +208,14 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
     );
     _logDebug('ws_event', 'connecting $wsUri');
     try {
-      _channel = WebSocketChannel.connect(wsUri);
+      // Fetch a fresh ID token on every connect attempt (including
+      // reconnects) since a token obtained earlier in a long-lived screen
+      // session may have expired by the time we reconnect.
+      final idToken = await _authIdentity.getIdToken();
+      _channel = IOWebSocketChannel.connect(
+        wsUri,
+        headers: {'authorization': 'Bearer $idToken'},
+      );
       _wsSub = _channel!.stream.listen(
         _onMessageReceived,
         onDone: () {

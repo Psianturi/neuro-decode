@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../config/app_config.dart';
-import '../../config/app_identity_store.dart';
+import '../../config/auth_identity.dart';
 
 class ProfileRecord {
   const ProfileRecord({
@@ -226,18 +226,13 @@ class ProfileContextSection {
 }
 
 class ProfileMemoryService {
-  ProfileMemoryService({AppIdentityStore? identityStore})
-      : _identityStore = identityStore ?? AppIdentityStore();
+  ProfileMemoryService({AuthIdentity? authIdentity})
+      : _authIdentity = authIdentity ?? AuthIdentity();
 
-  final AppIdentityStore _identityStore;
+  final AuthIdentity _authIdentity;
 
   Future<Uri> _buildUri(String path) async {
-    final userId = await _identityStore.getOrCreateUserId();
-    return Uri.parse('https://${AppConfig.backendUrl}$path').replace(
-      queryParameters: {
-        'user_id': userId,
-      },
-    );
+    return Uri.parse('https://${AppConfig.backendUrl}$path');
   }
 
   Future<Map<String, dynamic>> _sendJson({
@@ -249,8 +244,10 @@ class ProfileMemoryService {
     client.connectionTimeout = const Duration(seconds: 10);
 
     try {
+      final token = await _authIdentity.getIdToken();
       final request = await client.openUrl(method, uri);
       request.headers.contentType = ContentType.json;
+      request.headers.set('authorization', 'Bearer $token');
       if (payload != null) {
         request.write(jsonEncode(payload));
       }

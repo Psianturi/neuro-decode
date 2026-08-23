@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../../config/app_config.dart';
 import '../../config/app_identity_store.dart';
+import '../../config/auth_identity.dart';
 
 class SessionSummary {
   const SessionSummary({
@@ -113,17 +114,17 @@ class SessionSummary {
 }
 
 class SessionSummaryService {
-  SessionSummaryService({AppIdentityStore? identityStore})
-      : _identityStore = identityStore ?? AppIdentityStore();
+  SessionSummaryService({AppIdentityStore? identityStore, AuthIdentity? authIdentity})
+      : _identityStore = identityStore ?? AppIdentityStore(),
+        _authIdentity = authIdentity ?? AuthIdentity();
 
   final AppIdentityStore _identityStore;
+  final AuthIdentity _authIdentity;
 
   Future<Uri> _buildUri(String path) async {
-    final userId = await _identityStore.getOrCreateUserId();
     final profileId = await _identityStore.getActiveProfileId();
     return Uri.parse('https://${AppConfig.backendUrl}$path').replace(
       queryParameters: {
-        'user_id': userId,
         if (profileId != null && profileId.isNotEmpty) 'profile_id': profileId,
       },
     );
@@ -134,7 +135,9 @@ class SessionSummaryService {
     client.connectionTimeout = const Duration(seconds: 8);
 
     try {
+      final token = await _authIdentity.getIdToken();
       final request = await client.getUrl(uri);
+      request.headers.set('authorization', 'Bearer $token');
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
 
@@ -189,15 +192,16 @@ class SessionSummaryService {
   }
 
   Future<void> rateSession(String sessionId, int rating) async {
-    final userId = await _identityStore.getOrCreateUserId();
     final uri = Uri.parse(
       'https://${AppConfig.backendUrl}/sessions/$sessionId/rate',
-    ).replace(queryParameters: {'rating': rating.toString(), 'user_id': userId});
+    ).replace(queryParameters: {'rating': rating.toString()});
 
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 8);
     try {
+      final token = await _authIdentity.getIdToken();
       final request = await client.patchUrl(uri);
+      request.headers.set('authorization', 'Bearer $token');
       final response = await request.close();
       await response.drain<void>();
       if (response.statusCode < 200 || response.statusCode >= 300) {

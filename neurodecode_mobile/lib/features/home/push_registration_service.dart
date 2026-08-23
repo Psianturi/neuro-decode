@@ -6,12 +6,15 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../../config/app_config.dart';
 import '../../config/app_identity_store.dart';
+import '../../config/auth_identity.dart';
 
 class PushRegistrationService {
-  PushRegistrationService({AppIdentityStore? identityStore})
-      : _identityStore = identityStore ?? AppIdentityStore();
+  PushRegistrationService({AppIdentityStore? identityStore, AuthIdentity? authIdentity})
+      : _identityStore = identityStore ?? AppIdentityStore(),
+        _authIdentity = authIdentity ?? AuthIdentity();
 
   final AppIdentityStore _identityStore;
+  final AuthIdentity _authIdentity;
 
   Future<void> registerCurrentDeviceToken() async {
     try {
@@ -38,14 +41,13 @@ class PushRegistrationService {
       return;
     }
 
-    final userId = await _identityStore.getOrCreateUserId();
+    final idToken = await _authIdentity.getIdToken();
     final profileId = await _identityStore.getActiveProfileId();
 
     final currentProfile = profileId?.trim() ?? '';
 
     final uri = Uri.parse('https://${AppConfig.backendUrl}/devices/push-token').replace(
       queryParameters: {
-        'user_id': userId,
         if (currentProfile.isNotEmpty) 'profile_id': currentProfile,
       },
     );
@@ -61,6 +63,7 @@ class PushRegistrationService {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
+      request.headers.set('authorization', 'Bearer $idToken');
       request.write(payload);
       final response = await request.close();
       await response.drain();
