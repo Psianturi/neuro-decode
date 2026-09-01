@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.auth import get_current_uid
+from app.auth import get_uid_compat
 from app.state import push_device_store
 
 router = APIRouter()
@@ -12,7 +12,7 @@ router = APIRouter()
 async def register_push_token(
     payload: dict[str, object],
     profile_id: str | None = None,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     token = str(payload.get("token") or "").strip()
     if not token:
@@ -39,7 +39,7 @@ async def register_push_token(
 @router.post("/push-token/deactivate")
 async def deactivate_push_token(
     payload: dict[str, object],
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     token = str(payload.get("token") or "").strip()
     if not token:

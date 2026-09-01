@@ -47,6 +47,7 @@ class Settings:
     a2a_api_key: str | None
 
     legacy_claim_deadline_utc: str | None
+    auth_compat_deadline_utc: str | None
 
 
 def get_settings() -> Settings:
@@ -149,6 +150,17 @@ def get_settings() -> Settings:
     # date + trusted-window length (see neurodecode_backend/README.md).
     legacy_claim_deadline_utc = os.getenv("NEURODECODE_LEGACY_CLAIM_DEADLINE_UTC", "").strip() or None
 
+    # Absolute UTC ISO timestamp until which sessions/profiles/notifications/
+    # devices/ws-live accept an unverified `user_id` query param as a
+    # fallback for callers still on the pre-Firebase-Auth app version — a
+    # deliberate, time-boxed rollout compatibility window rather than a hard
+    # cutover, so backend auth enforcement doesn't have to wait for 100%
+    # mobile adoption. Unset by default, which reproduces the strict
+    # (verified-token-only) behavior with no fallback at all — must be set
+    # explicitly to actually open the window. See
+    # neurodecode_backend/README.md for the rollout sequencing this exists for.
+    auth_compat_deadline_utc = os.getenv("NEURODECODE_AUTH_COMPAT_DEADLINE_UTC", "").strip() or None
+
     return Settings(
         gemini_api_key=gemini_api_key,
         live_model=live_model,
@@ -183,4 +195,5 @@ def get_settings() -> Settings:
         a2a_skill_enrichment_enabled=a2a_skill_enrichment_enabled,
         a2a_api_key=a2a_api_key,
         legacy_claim_deadline_utc=legacy_claim_deadline_utc,
+        auth_compat_deadline_utc=auth_compat_deadline_utc,
     )

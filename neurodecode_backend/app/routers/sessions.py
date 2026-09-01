@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth import get_current_uid
+from app.auth import get_uid_compat
 from app.state import LATEST_SESSION_MAX_ITEMS, session_store
 
 router = APIRouter()
@@ -11,7 +11,7 @@ router = APIRouter()
 @router.get("/latest")
 async def sessions_latest(
     profile_id: str | None = None,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     latest = await session_store.get_latest(user_id=uid, profile_id=profile_id)
     if latest is None:
@@ -22,7 +22,7 @@ async def sessions_latest(
 @router.get("")
 async def sessions_list(
     profile_id: str | None = None,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     items = await session_store.list_recent(
         LATEST_SESSION_MAX_ITEMS,
@@ -40,7 +40,7 @@ async def sessions_list(
 async def sessions_rate(
     session_id: str,
     rating: int,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     if rating < 1 or rating > 5:
         return {"status": "error", "message": "rating must be 1–5"}

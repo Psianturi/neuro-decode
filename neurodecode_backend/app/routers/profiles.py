@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 
-from app.auth import get_current_uid
+from app.auth import get_uid_compat
 from app.memory_context import build_private_memory_context
 from app.state import profile_store, session_store
 
@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/{profile_id}")
-async def profile_get(profile_id: str, uid: str = Depends(get_current_uid)) -> dict[str, object]:
+async def profile_get(profile_id: str, uid: str = Depends(get_uid_compat)) -> dict[str, object]:
     profile = await profile_store.get_profile(profile_id, user_id=uid)
     if profile is None:
         return {
@@ -27,7 +27,7 @@ async def profile_get(profile_id: str, uid: str = Depends(get_current_uid)) -> d
 async def profile_upsert(
     profile_id: str,
     payload: dict[str, object],
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     record = dict(payload)
     record["profile_id"] = profile_id
@@ -41,7 +41,7 @@ async def profile_upsert(
 async def profile_memory_list(
     profile_id: str,
     limit: int = 10,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     safe_limit = max(1, min(limit, 50))
     items = await profile_store.list_profile_memory(
@@ -61,7 +61,7 @@ async def profile_memory_list(
 async def profile_memory_add(
     profile_id: str,
     payload: dict[str, object],
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     record = dict(payload)
     record["profile_id"] = profile_id
@@ -76,7 +76,7 @@ async def profile_memory_add(
 @router.get("/{profile_id}/memory-context")
 async def profile_memory_context(
     profile_id: str,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     profile = await profile_store.get_profile(profile_id, user_id=uid)
     items = await profile_store.list_profile_memory(profile_id, 5, user_id=uid)

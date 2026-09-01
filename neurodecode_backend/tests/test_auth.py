@@ -130,3 +130,74 @@ def test_profile_visible_to_owner(
     resp = client.get("/profiles/joy1", headers={"Authorization": "Bearer valid-alice"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+# ── Rollout compatibility window (NEURODECODE_AUTH_COMPAT_DEADLINE_UTC) ──
+# Settings is a frozen dataclass, so these tests swap the module-level
+# `settings` object in app.auth rather than mutating a field on it.
+
+
+class _FakeSettings:
+    def __init__(self, auth_compat_deadline_utc: str | None) -> None:
+        self.auth_compat_deadline_utc = auth_compat_deadline_utc
+
+
+def test_compat_fallback_disabled_by_default(client: TestClient) -> None:
+    """No Authorization header, no window configured -> strict 401, same as
+    a hard cutover. The window must be explicitly opted into."""
+    resp = client.get("/profiles/joy1", params={"user_id": "uid-alice"})
+    assert resp.status_code == 401
+
+
+def test_compat_fallback_grants_access_within_window(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(auth_module, "settings", _FakeSettings("2999-01-01T00:00:00+00:00"))
+    resp = client.get("/profiles/joy1", params={"user_id": "uid-alice"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+def test_compat_fallback_rejected_after_deadline(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(auth_module, "settings", _FakeSettings("2000-01-01T00:00:00+00:00"))
+    resp = client.get("/profiles/joy1", params={"user_id": "uid-alice"})
+    assert resp.status_code == 401
+
+
+def test_verified_token_takes_priority_over_compat_param(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even with the window open, a caller sending a real token must never be
+    identified by a legacy user_id query param instead — an updated app
+    always gets the secure path."""
+    monkeypatch.setattr(auth_module, "settings", _FakeSettings("2999-01-01T00:00:00+00:00"))
+    _fake_verifier(monkeypatch, {"valid-mallory": "uid-mallory"})
+    resp = client.get(
+        "/profiles/joy1",
+        params={"user_id": "uid-alice"},
+        headers={"Authorization": "Bearer valid-mallory"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "empty"  # mallory, not alice -> not visible
+
+
+def test_claim_legacy_never_accepts_compat_fallback() -> None:
+    """/account/claim-legacy must stay on the strict dependency: it's the
+    bridge from an unverified legacy id to a *verified* uid, so the uid side
+    can never itself come from the same unverified fallback — a legacy
+    user_id query param alone (no Authorization header) must still 401
+    regardless of whether a compat window is open elsewhere."""
+    from app.routers import account as account_router
+
+    test_app = FastAPI()
+    test_app.include_router(account_router.router, prefix="/account")
+    client = TestClient(test_app)
+
+    resp = client.post(
+        "/account/claim-legacy",
+        params={"user_id": "uid-alice"},
+        json={"legacy_user_id": "user-old-123"},
+    )
+    assert resp.status_code == 401

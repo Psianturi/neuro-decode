@@ -23,7 +23,7 @@ from app.protocol import b64_decode, b64_encode, ensure_type
 from app.clinical_store import ClinicalStore
 from app.a2a_client import call_skill as _a2a_call_skill
 from app.settings import get_settings
-from app.auth import get_ws_uid
+from app.auth import get_ws_uid_compat
 from app.auth_alert import AuthDenialAlertMiddleware
 from app.state import (
     settings as _startup_settings,
@@ -1123,7 +1123,7 @@ async def ws_live(websocket: WebSocket) -> None:
     # Verify the caller's identity BEFORE accepting the upgrade — Authorization
     # is readable off the ASGI scope pre-accept, so an unverified caller never
     # gets a live socket at all instead of being accepted and then dropped.
-    verified_uid = await get_ws_uid(websocket)
+    verified_uid = await get_ws_uid_compat(websocket)
     if verified_uid is None:
         await websocket.close(code=1008)
         return

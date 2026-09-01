@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth import get_current_uid
+from app.auth import get_uid_compat
 from app.state import notification_store
 
 router = APIRouter()
@@ -13,7 +13,7 @@ async def notifications_list(
     profile_id: str | None = None,
     status: str | None = None,
     limit: int = 20,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     safe_limit = max(1, min(limit, 100))
     safe_status = status.strip().lower() if isinstance(status, str) and status.strip() else None
@@ -33,7 +33,7 @@ async def notifications_list(
 @router.post("/{notification_id}/read")
 async def notifications_mark_read(
     notification_id: str,
-    uid: str = Depends(get_current_uid),
+    uid: str = Depends(get_uid_compat),
 ) -> dict[str, object]:
     result = await notification_store.mark_read(notification_id, user_id=uid)
     if result == "forbidden":
