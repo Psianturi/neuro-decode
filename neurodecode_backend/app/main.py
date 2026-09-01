@@ -626,32 +626,19 @@ async def _build_rule_notifications(
 
         if strong_audio_count >= 2:
             severity = _severity_for_repeated_trigger(strong_audio_count)
+            # Deliberately not sent as a push notification: this rule asserts
+            # "distress patterns appeared" as fact, derived entirely from the
+            # audio observer's low-confidence, unvalidated signal (see
+            # ai_processor.py). A push notification is a more prominent,
+            # anxiety-inducing channel than the in-session note, so it stays
+            # suppressed until the underlying signal is validated (temporal
+            # buffering / Tahap B) — kept as a debug-visible evaluation only.
             mark_evaluation(
                 rule_id="repeated_audio_trigger",
                 triggered=True,
                 severity=severity,
-                reason="Recent sessions show repeated meaningful audio triggers.",
+                reason="Recent sessions show repeated meaningful audio triggers (push suppressed — signal not yet validated).",
                 metadata={"recent_strong_audio_count": strong_audio_count},
-            )
-            out.append(
-                _build_rule_notification(
-                    now=now,
-                    user_id=user_id,
-                    profile_id=profile_id,
-                    session_id=session_id,
-                    rule_id="repeated_audio_trigger",
-                    severity=severity,
-                    title="Repeated audio distress pattern",
-                    message=(
-                        "Audio distress patterns appeared in recent sessions. "
-                        "Prepare a low-noise routine before known sensitive windows."
-                    ),
-                    recommended_action="Lower environmental noise 5-10 minutes before expected trigger time.",
-                    fallback_action="Move to a quieter room and use a short calming cue.",
-                    metadata={
-                        "recent_strong_audio_count": strong_audio_count,
-                    },
-                )
             )
         else:
             mark_evaluation(
@@ -664,32 +651,17 @@ async def _build_rule_notifications(
 
         if strong_visual_count >= 2:
             severity = _severity_for_repeated_trigger(strong_visual_count)
+            # Deliberately not sent as a push notification — same reasoning
+            # as repeated_audio_trigger above: the vision observer signal is
+            # unvalidated (it currently has no real motion-over-time data at
+            # all, see ai_processor.py), so a confident cross-session "overload
+            # signal" push is suppressed until that's fixed. Debug-visible only.
             mark_evaluation(
                 rule_id="repeated_visual_trigger",
                 triggered=True,
                 severity=severity,
-                reason="Recent sessions show repeated meaningful visual triggers.",
+                reason="Recent sessions show repeated meaningful visual triggers (push suppressed — signal not yet validated).",
                 metadata={"recent_strong_visual_count": strong_visual_count},
-            )
-            out.append(
-                _build_rule_notification(
-                    now=now,
-                    user_id=user_id,
-                    profile_id=profile_id,
-                    session_id=session_id,
-                    rule_id="repeated_visual_trigger",
-                    severity=severity,
-                    title="Repeated visual overload signal",
-                    message=(
-                        "Visual overload signals appeared in recent sessions. "
-                        "Reduce visual clutter and simplify transitions around trigger periods."
-                    ),
-                    recommended_action="Dim lights and reduce moving visual stimuli before escalation window.",
-                    fallback_action="Pause current activity and switch to one familiar calming routine.",
-                    metadata={
-                        "recent_strong_visual_count": strong_visual_count,
-                    },
-                )
             )
         else:
             mark_evaluation(

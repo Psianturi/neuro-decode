@@ -428,12 +428,11 @@ class _LiveAgentScreenState extends State<LiveAgentScreen> {
             'System',
             'Profile memory active for $profileId ($lineCount context lines).',
           );
-          if (cues.isNotEmpty) {
-            _addLog(
-              'System',
-              'Memory cues: ${cues.join(' | ')}',
-            );
-          }
+          // Deliberately not logged to the visible transcript: cues can
+          // contain the child's and caregiver's names (e.g. "Child: Rene |
+          // Caregiver: Mother, Harwin"), which would sit on screen as a
+          // chat bubble anyone nearby could see, screenshot, or record.
+          // Still available on-demand via the memory-cues dialog button.
         }
         return;
       }
