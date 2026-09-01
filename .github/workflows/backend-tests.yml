@@ -37,4 +37,4 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: python -m pytest tests/ -v
