@@ -188,8 +188,9 @@ class NeuroDecodeAI:
 
             if distress_score > 0.68:
                 return (
-                    "[Audio Observer Note] Potential distress pattern detected in vocal tone. "
-                    "Offer calm, short verbal reassurance and reduce stimulation."
+                    "[Audio Observer Note] Experimental signal (low confidence, unvalidated model): "
+                    "vocal tone pattern flagged, not a confirmed distress event. "
+                    "If relevant, offer calm, short verbal reassurance and reduce stimulation."
                 )
             return ""
         except Exception as e:
@@ -238,8 +239,10 @@ class NeuroDecodeAI:
 
             if stimming_confidence > 0.55:
                 return (
-                    "[Visual Observer Note] Possible repetitive movement pattern detected. "
-                    "Guide caregiver to reduce sensory load and offer grounding support."
+                    "[Visual Observer Note] Experimental signal (low confidence, unvalidated model — "
+                    "the current pipeline has no real motion-over-time data, so this cannot actually "
+                    "confirm repetitive movement): a visual pattern was flagged, not a confirmed "
+                    "observation. If relevant, gently check in and offer to reduce visual stimulation."
                 )
             return ""
         except Exception as e:

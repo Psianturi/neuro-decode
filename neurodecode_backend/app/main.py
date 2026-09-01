@@ -78,12 +78,15 @@ SYSTEM_INSTRUCTION = (
     "advice. You will sometimes receive hidden internal sensor notes formatted as "
     "[Visual Observer Note] or [Audio Observer Note]. Treat these notes as private "
     "context only. NEVER read or quote the note text verbatim to the caregiver. "
+    "These notes come from experimental, unvalidated sensor models — they are low-confidence "
+    "hints, not confirmed observations. Never imply certainty about what was detected, and "
+    "never treat multiple notes within one session as proof of an escalating pattern by "
+    "themselves — each note stands alone. When in doubt, favor a gentle, low-key suggestion "
+    "over a confident or urgent one. "
     "Instead, translate it into natural, calm, practical support guidance. "
     "When an observer note includes profile context (known triggers, effective interventions), "
     "prioritize those specific interventions above generic suggestions — do not give generic ASD advice "
     "when you have specific information about this child. "
-    "If the observer note mentions this is trigger #2 or higher in the same session, "
-    "acknowledge the escalation pattern explicitly: suggest a proactive strategy, not just reactive calming. "
     "Prioritize "
     "short, supportive interventions such as reducing sensory load, grounding, "
     "co-regulation, deep pressure when appropriate, and clear step-by-step caregiver "
@@ -290,7 +293,11 @@ def _build_summary_prompt(
         "use them ONLY for TRIGGERS_AUDIO. NEVER attribute an audio observation as a visual "
         "trigger or vice versa. If a list is empty, state that no trigger was detected for "
         "that modality. Never quote internal note labels such as [Visual Observer Note] or "
-        "[Audio Observer Note] verbatim in the output.\n\n"
+        "[Audio Observer Note] verbatim in the output. "
+        "Observer notes come from an experimental, unvalidated sensor model, not a confirmed "
+        "behavioral assessment. When a TRIGGERS_VISUAL or TRIGGERS_AUDIO field is based only "
+        "on an observer note (no corroborating transcript evidence), phrase it as something "
+        "flagged or possible, never as a fact that was confirmed to have happened.\n\n"
         "Output MUST follow this exact structure:\n"
         "TITLE: <short title>\n"
         "TRIGGERS_VISUAL: <1 sentence with concrete visual evidence, if any>\n"
@@ -1225,6 +1232,14 @@ async def ws_live(websocket: WebSocket) -> None:
         audio_observer_task: asyncio.Task[None] | None = None
         vision_observer_task: asyncio.Task[None] | None = None
         last_vision_note_text = ""
+        # The vision model has no real temporal signal — the app sends one
+        # frame every few seconds and, when the model expects a sequence,
+        # that single frame is repeated to fake one (see ai_processor.py).
+        # It cannot actually observe repetition. Requiring 2 consecutive
+        # single-frame detections before surfacing anything is a cheap
+        # guardrail against acting on one noisy frame; it does not fix the
+        # underlying signal quality.
+        vision_consecutive_hits = 0
         audio_turn_open = False
         awaiting_model_response = False
         model_turn_active = False
@@ -1465,33 +1480,28 @@ async def ws_live(websocket: WebSocket) -> None:
                     # Enrich note with profile context so Gemini responds to THIS child
                     profile_snippet = _build_profile_context_snippet()
                     enriched = note if not profile_snippet else f"{note} | Profile context: {profile_snippet}"
-                    # Include session pattern: how many audio triggers so far this session
-                    trigger_count = len(observer_audio_log)
-                    if trigger_count >= 2:
-                        enriched += f" | Audio trigger #{trigger_count} this session — escalation pattern possible."
+                    # Deliberately no raw trigger-count escalation language here:
+                    # repeated single-shot detections from an uncalibrated
+                    # threshold are not evidence of an escalating pattern by
+                    # themselves (see run_vision_observer for the same reasoning).
 
                     skill_ctx = _consume_skill_context()
                     if skill_ctx:
                         enriched += f" | Specialist guidance: {skill_ctx}"
                     await session.send_observer_note(enriched, end_of_turn=False)
-                    # Fire A2A skill for the NEXT turn (result arrives ~2-4s, injected then)
+                    # Fire A2A skill for the NEXT turn (result arrives ~2-4s, injected then).
+                    # Always the practical/de-escalation framing, never the
+                    # "assess escalation risk" framing — that used to be
+                    # chosen by raw trigger count alone, which isn't a
+                    # reliable signal of an actually escalating situation.
                     if settings.a2a_skill_enrichment_enabled and settings.a2a_url:
                         profile_ctx = _build_profile_context_snippet()
-                        if trigger_count >= 2:
-                            asyncio.create_task(_fire_skill_enrichment(
-                                f"Assess escalation risk and give immediate de-escalation steps. "
-                                f"Audio trigger #{trigger_count} this session. "
-                                f"Observer note: {note}."
-                                + (f" Child profile: {profile_ctx}." if profile_ctx else ""),
-                                "EscalationRisk",
-                            ))
-                        else:
-                            asyncio.create_task(_fire_skill_enrichment(
-                                f"Provide practical de-escalation steps for a caregiver. "
-                                f"Observation: {note}."
-                                + (f" Child profile: {profile_ctx}." if profile_ctx else ""),
-                                "DeEscalation",
-                            ))
+                        asyncio.create_task(_fire_skill_enrichment(
+                            f"Provide practical de-escalation steps for a caregiver. "
+                            f"Observation: {note}."
+                            + (f" Child profile: {profile_ctx}." if profile_ctx else ""),
+                            "DeEscalation",
+                        ))
                 else:
                     print(f"[observer_event] modality=audio bytes={len(observer_audio)} hash={_audio_hash} triggered=False")
             except asyncio.CancelledError:
@@ -1500,29 +1510,40 @@ async def ws_live(websocket: WebSocket) -> None:
                 print(f"[observer] Audio observer error: {e}")
 
         async def run_vision_observer(frame_b64: str) -> None:
-            nonlocal last_vision_note_text
+            nonlocal last_vision_note_text, vision_consecutive_hits
             try:
                 note = await asyncio.to_thread(ai_engine.process_vision_frame, frame_b64)
-                if note:
-                    normalized_note = note.strip().lower()
-                    if normalized_note and normalized_note == last_vision_note_text:
-                        return
-                    last_vision_note_text = normalized_note
-                    print(f"[observer] Visual note triggered")
-                    observer_visual_log.append(note)
-                    queue_session_event("observer_visual_trigger", source="visual_observer", text=note)
-                    await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
-                    # Enrich note with profile context so Gemini responds to THIS child
-                    profile_snippet = _build_profile_context_snippet()
-                    enriched = note if not profile_snippet else f"{note} | Profile context: {profile_snippet}"
-                    trigger_count = len(observer_visual_log)
-                    if trigger_count >= 2:
-                        enriched += f" | Visual trigger #{trigger_count} this session — consider reducing visual stimuli."
-                    # Append any A2A skill context ready from a previous trigger (non-blocking)
-                    skill_ctx = _consume_skill_context()
-                    if skill_ctx:
-                        enriched += f" | Specialist guidance: {skill_ctx}"
-                    await session.send_observer_note(enriched, end_of_turn=False)
+                if not note:
+                    vision_consecutive_hits = 0
+                    print("[observer_event] modality=visual triggered=False")
+                    return
+
+                vision_consecutive_hits += 1
+                if vision_consecutive_hits < 2:
+                    # Single-frame hit only — the model has no real temporal
+                    # signal to confirm this against, so don't act on it yet.
+                    print(
+                        f"[observer_event] modality=visual triggered=True "
+                        f"consecutive={vision_consecutive_hits} (below confirmation threshold, suppressed)"
+                    )
+                    return
+
+                normalized_note = note.strip().lower()
+                if normalized_note and normalized_note == last_vision_note_text:
+                    return
+                last_vision_note_text = normalized_note
+                print("[observer] Visual note triggered (2 consecutive detections)")
+                observer_visual_log.append(note)
+                queue_session_event("observer_visual_trigger", source="visual_observer", text=note)
+                await websocket.send_text(json.dumps({"type": "observer_note", "text": note}))
+                # Enrich note with profile context so Gemini responds to THIS child
+                profile_snippet = _build_profile_context_snippet()
+                enriched = note if not profile_snippet else f"{note} | Profile context: {profile_snippet}"
+                # Append any A2A skill context ready from a previous trigger (non-blocking)
+                skill_ctx = _consume_skill_context()
+                if skill_ctx:
+                    enriched += f" | Specialist guidance: {skill_ctx}"
+                await session.send_observer_note(enriched, end_of_turn=False)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
