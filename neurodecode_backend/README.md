@@ -152,6 +152,34 @@ Important:
 - If live session returns `GEMINI_API_KEY is required`, run the "restore all secrets" command above — most likely `--set-secrets` was used instead of `--update-secrets` somewhere.
 - `NEURODECODE_ADMIN_SECRET` guards `POST /admin/clinical-resources` and `PATCH /admin/clinical-resources/{id}`. Without it set, those endpoints are unprotected.
 
+## Auth rollout: compatibility window and legacy-id migration
+
+Sessions/profiles/notifications/devices/`/ws/live` require a verified Firebase
+ID token (`Authorization: Bearer <token>`). Two env vars control the
+rollout of this requirement — both are **unset by default**, which means the
+strictest, most secure behavior applies with zero configuration:
+
+- `NEURODECODE_AUTH_COMPAT_DEADLINE_UTC` (absolute UTC ISO timestamp, e.g.
+  `2026-09-15T00:00:00+00:00`): while set and not yet passed, a request with
+  no `Authorization` header falls back to trusting a legacy `user_id` query
+  param — the pre-auth behavior — so callers still on an old app version keep
+  working. A request that *does* send a token always uses it, never the
+  fallback. **Do not deploy the auth requirement to `main` without setting
+  this to a real near-term date first**, unless every caregiver is already on
+  an app version that sends the token — a bare cutover with this unset broke
+  production once already (2026-08-23). After the deadline passes, this
+  reverts to the strict behavior automatically, no redeploy needed.
+- `NEURODECODE_LEGACY_CLAIM_DEADLINE_UTC` (same format): opens
+  `POST /account/claim-legacy`, the one-time migration that re-links a
+  device's pre-auth Firestore data to its new verified uid. Leave unset until
+  you're actually ready to open that migration — the endpoint returns `503`
+  by design when it isn't configured, rather than accepting claims with no
+  cutoff.
+
+Both are set via `--update-env-vars` alongside the existing `--set-secrets`
+in the Cloud Run deploy command, not via Secret Manager (they're not
+secrets).
+
 ## Clinical Resources harvest
 
 ASD clinic and school data for Jakarta is harvested from Google Places API and stored permanently in Firestore `clinical_resources/`. End users never hit the Places API directly.

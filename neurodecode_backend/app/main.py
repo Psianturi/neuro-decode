@@ -18,17 +18,22 @@ from app.ai_processor import ai_engine
 from app.gemini_live import GeminiLiveSession
 from app.memory_context import build_private_memory_context
 from app.relevance_filter import filter_community_insights
-from app.notification_store import NotificationStore
-from app.push_device_store import PushDeviceStore
-from app.push_sender import PushSender
 from app.followup_engine import process_pending_followups
-from app.profile_store import ProfileStore
 from app.protocol import b64_decode, b64_encode, ensure_type
-from app.rule_debug_store import RuleDebugStore
 from app.clinical_store import ClinicalStore
 from app.a2a_client import call_skill as _a2a_call_skill
-from app.session_store import SessionStore
 from app.settings import get_settings
+from app.auth import get_ws_uid_compat
+from app.auth_alert import AuthDenialAlertMiddleware
+from app.state import (
+    settings as _startup_settings,
+    session_store,
+    profile_store,
+    notification_store,
+    rule_debug_store,
+    push_device_store,
+    push_sender,
+)
 
 
 load_dotenv()
@@ -36,14 +41,30 @@ load_dotenv()
 app = FastAPI(title="NeuroDecode AI Backend")
 
 from app.routers import stats as _stats_router  # noqa: E402
+from app.routers import sessions as _sessions_router  # noqa: E402
+from app.routers import notifications as _notifications_router  # noqa: E402
+from app.routers import profiles as _profiles_router  # noqa: E402
+from app.routers import devices as _devices_router  # noqa: E402
+from app.routers import account as _account_router  # noqa: E402
+
 app.include_router(_stats_router.router, prefix="/stats", tags=["stats"])
+app.include_router(_sessions_router.router, prefix="/sessions", tags=["sessions"])
+app.include_router(_notifications_router.router, prefix="/notifications", tags=["notifications"])
+app.include_router(_profiles_router.router, prefix="/profiles", tags=["profiles"])
+app.include_router(_devices_router.router, prefix="/devices", tags=["devices"])
+app.include_router(_account_router.router, prefix="/account", tags=["account"])
+
+app.add_middleware(
+    AuthDenialAlertMiddleware,
+    bot_token=_startup_settings.telegram_bot_token,
+    chat_id=_startup_settings.telegram_chat_id,
+)
 
 IDLE_TIMEOUT_SECONDS = 120
 AUDIO_OBSERVER_COOLDOWN_SECONDS = 4
 VISION_OBSERVER_COOLDOWN_SECONDS = 4
-MIN_AUDIO_BYTES_FOR_ANALYSIS = 20000 
+MIN_AUDIO_BYTES_FOR_ANALYSIS = 20000
 MIN_AUDIO_BYTES_AT_TURN_END = 6000  # Flush short turns so observer still gets a chance.
-LATEST_SESSION_MAX_ITEMS = 10
 
 
 @app.on_event("startup")
@@ -746,14 +767,6 @@ async def _build_rule_notifications(
     return out[:3]
 
 
-async def _get_latest_session_summary(
-    *,
-    user_id: str | None = None,
-    profile_id: str | None = None,
-) -> dict[str, object] | None:
-    return await session_store.get_latest(user_id=user_id, profile_id=profile_id)
-
-
 async def _load_profile_memory_context(
     *,
     user_id: str,
@@ -807,32 +820,9 @@ async def _load_profile_memory_context(
     )
 
 
-_startup_settings = get_settings()
-session_store = SessionStore(
-    firestore_enabled=_startup_settings.firestore_enabled,
-    firestore_collection=_startup_settings.firestore_collection,
-    firestore_event_collection=_startup_settings.firestore_event_collection,
-    firestore_project=_startup_settings.firestore_project,
-    max_memory_items=LATEST_SESSION_MAX_ITEMS,
-)
-profile_store = ProfileStore(
-    firestore_enabled=_startup_settings.firestore_enabled,
-    profile_collection=_startup_settings.firestore_profile_collection,
-    profile_memory_collection=_startup_settings.firestore_profile_memory_collection,
-    firestore_project=_startup_settings.firestore_project,
-)
-notification_store = NotificationStore(
-    firestore_enabled=_startup_settings.firestore_enabled,
-    notification_collection=_startup_settings.firestore_notification_collection,
-    firestore_project=_startup_settings.firestore_project,
-)
-rule_debug_store = RuleDebugStore(max_items=_startup_settings.admin_debug_max_items)
-push_device_store = PushDeviceStore(
-    firestore_enabled=_startup_settings.firestore_enabled,
-    device_collection=_startup_settings.firestore_push_device_collection,
-    firestore_project=_startup_settings.firestore_project,
-)
-push_sender = PushSender(enabled=_startup_settings.fcm_enabled)
+# session_store, profile_store, notification_store, rule_debug_store,
+# push_device_store, push_sender, and _startup_settings are singletons shared
+# with app/routers/*.py — constructed once in app/state.py and imported above.
 
 _clinical_store: ClinicalStore | None = None
 
@@ -894,43 +884,8 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/sessions/latest")
-async def sessions_latest(
-    user_id: str | None = None,
-    profile_id: str | None = None,
-) -> dict[str, object]:
-    latest = await _get_latest_session_summary(user_id=user_id, profile_id=profile_id)
-    if latest is None:
-        return {"status": "empty", "message": "No completed session summary yet"}
-    return {"status": "ok", "session": latest}
-
-
-@app.get("/sessions")
-async def sessions_list(
-    user_id: str | None = None,
-    profile_id: str | None = None,
-) -> dict[str, object]:
-    items = await session_store.list_recent(
-        LATEST_SESSION_MAX_ITEMS,
-        user_id=user_id,
-        profile_id=profile_id,
-    )
-    return {
-        "status": "ok",
-        "count": len(items),
-        "sessions": items,
-    }
-
-
-@app.patch("/sessions/{session_id}/rate")
-async def sessions_rate(
-    session_id: str,
-    rating: int,
-) -> dict[str, object]:
-    if rating < 1 or rating > 5:
-        return {"status": "error", "message": "rating must be 1–5"}
-    await session_store.rate_session(session_id, rating)
-    return {"status": "ok", "session_id": session_id, "caregiver_rating": rating}
+# /sessions, /sessions/latest, /sessions/{id}/rate moved to app/routers/sessions.py
+# (now require a verified caller identity — see app/auth.py).
 
 
 @app.post("/sessions/process-followups")
@@ -957,113 +912,9 @@ async def sessions_process_followups(
     return {"status": "ok", **result}
 
 
-@app.get("/notifications")
-async def notifications_list(
-    user_id: str | None = None,
-    profile_id: str | None = None,
-    status: str | None = None,
-    limit: int = 20,
-) -> dict[str, object]:
-    safe_limit = max(1, min(limit, 100))
-    safe_status = status.strip().lower() if isinstance(status, str) and status.strip() else None
-    items = await notification_store.list_recent(
-        safe_limit,
-        user_id=user_id,
-        profile_id=profile_id,
-        status=safe_status,
-    )
-    return {
-        "status": "ok",
-        "count": len(items),
-        "items": items,
-    }
-
-
-@app.post("/notifications/{notification_id}/read")
-async def notifications_mark_read(
-    notification_id: str,
-    user_id: str | None = None,
-) -> dict[str, object]:
-    updated = await notification_store.mark_read(notification_id, user_id=user_id)
-    if not updated:
-        return {
-            "status": "empty",
-            "message": "Notification not found",
-            "notification_id": notification_id,
-        }
-    return {
-        "status": "ok",
-        "notification_id": notification_id,
-    }
-
-
-@app.post("/devices/push-token")
-async def register_push_token(
-    payload: dict[str, object],
-    user_id: str | None = None,
-    profile_id: str | None = None,
-) -> dict[str, object]:
-    if not user_id:
-        return {
-            "status": "error",
-            "message": "user_id is required",
-        }
-
-    token = str(payload.get("token") or "").strip()
-    if not token:
-        return {
-            "status": "error",
-            "message": "token is required",
-        }
-
-    platform = str(payload.get("platform") or "").strip() or None
-    app_version = str(payload.get("app_version") or "").strip() or None
-
-    item = await push_device_store.register(
-        user_id=user_id,
-        token=token,
-        profile_id=profile_id,
-        platform=platform,
-        app_version=app_version,
-    )
-    token_tail = token[-8:] if len(token) >= 8 else token
-    print(
-        f"[push] token registered user_id={user_id} profile_id={profile_id or ''} platform={platform or 'unknown'} token_tail={token_tail}"
-    )
-    return {
-        "status": "ok",
-        "item": item,
-    }
-
-
-@app.post("/devices/push-token/deactivate")
-async def deactivate_push_token(
-    payload: dict[str, object],
-    user_id: str | None = None,
-) -> dict[str, object]:
-    if not user_id:
-        return {
-            "status": "error",
-            "message": "user_id is required",
-        }
-
-    token = str(payload.get("token") or "").strip()
-    if not token:
-        return {
-            "status": "error",
-            "message": "token is required",
-        }
-
-    updated = await push_device_store.deactivate(user_id=user_id, token=token)
-    if not updated:
-        return {
-            "status": "empty",
-            "message": "Push token not found",
-        }
-
-    return {
-        "status": "ok",
-    }
+# /notifications, /notifications/{id}/read moved to app/routers/notifications.py
+# /devices/push-token, /devices/push-token/deactivate moved to app/routers/devices.py
+# (all now require a verified caller identity — see app/auth.py).
 
 
 @app.get("/admin/rules/debug")
@@ -1193,91 +1044,9 @@ async def admin_push_test(
     }
 
 
-@app.get("/profiles/{profile_id}")
-async def profile_get(profile_id: str, user_id: str | None = None) -> dict[str, object]:
-    profile = await profile_store.get_profile(profile_id, user_id=user_id)
-    if profile is None:
-        return {
-            "status": "empty",
-            "message": "Profile not found",
-            "profile_id": profile_id,
-        }
-    return {"status": "ok", "profile": profile}
-
-
-@app.put("/profiles/{profile_id}")
-async def profile_upsert(
-    profile_id: str,
-    payload: dict[str, object],
-    user_id: str | None = None,
-) -> dict[str, object]:
-    record = dict(payload)
-    record["profile_id"] = profile_id
-    if user_id:
-        record["user_id"] = user_id
-    record["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    await profile_store.upsert_profile(profile_id, record, user_id=user_id)
-    return {"status": "ok", "profile": record}
-
-
-@app.get("/profiles/{profile_id}/memory")
-async def profile_memory_list(
-    profile_id: str,
-    limit: int = 10,
-    user_id: str | None = None,
-) -> dict[str, object]:
-    safe_limit = max(1, min(limit, 50))
-    items = await profile_store.list_profile_memory(
-        profile_id,
-        safe_limit,
-        user_id=user_id,
-    )
-    return {
-        "status": "ok",
-        "profile_id": profile_id,
-        "count": len(items),
-        "items": items,
-    }
-
-
-@app.post("/profiles/{profile_id}/memory")
-async def profile_memory_add(
-    profile_id: str,
-    payload: dict[str, object],
-    user_id: str | None = None,
-) -> dict[str, object]:
-    record = dict(payload)
-    record["profile_id"] = profile_id
-    if user_id:
-        record["user_id"] = user_id
-    record.setdefault("active", True)
-    record.setdefault("confidence", "medium")
-    record["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    await profile_store.add_profile_memory(profile_id, record, user_id=user_id)
-    return {"status": "ok", "item": record}
-
-
-@app.get("/profiles/{profile_id}/memory-context")
-async def profile_memory_context(
-    profile_id: str,
-    user_id: str | None = None,
-) -> dict[str, object]:
-    profile = await profile_store.get_profile(profile_id, user_id=user_id)
-    items = await profile_store.list_profile_memory(profile_id, 5, user_id=user_id)
-    sessions = await session_store.list_recent(5, user_id=user_id, profile_id=profile_id)
-    context = build_private_memory_context(
-        profile=profile,
-        profile_memory_items=items,
-        recent_sessions=sessions,
-    )
-    return {
-        "status": "ok",
-        "profile_id": profile_id,
-        "profile_found": profile is not None,
-        "memory_item_count": len(items),
-        "recent_session_count": len(sessions),
-        "context": context,
-    }
+# /profiles/{id}, /profiles/{id}/memory, /profiles/{id}/memory-context moved
+# to app/routers/profiles.py (now require a verified caller identity — see
+# app/auth.py).
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1322,7 +1091,7 @@ def clinical_resource_create(
 ) -> dict[str, object]:
     """Create a new clinical resource. Admin-only (requires X-Admin-Secret header)."""
     admin_secret = _startup_settings.admin_secret
-    if admin_secret and x_admin_secret != admin_secret:
+    if not admin_secret or x_admin_secret != admin_secret:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Forbidden")
     store = _get_clinical_store()
@@ -1338,7 +1107,7 @@ def clinical_resource_update(
 ) -> dict[str, object]:
     """Partial update a clinical resource. Admin-only."""
     admin_secret = _startup_settings.admin_secret
-    if admin_secret and x_admin_secret != admin_secret:
+    if not admin_secret or x_admin_secret != admin_secret:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Forbidden")
     store = _get_clinical_store()
@@ -1351,9 +1120,17 @@ def clinical_resource_update(
 
 @app.websocket("/ws/live")
 async def ws_live(websocket: WebSocket) -> None:
+    # Verify the caller's identity BEFORE accepting the upgrade — Authorization
+    # is readable off the ASGI scope pre-accept, so an unverified caller never
+    # gets a live socket at all instead of being accepted and then dropped.
+    verified_uid = await get_ws_uid_compat(websocket)
+    if verified_uid is None:
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     settings = get_settings()
-    user_id = (websocket.query_params.get("user_id") or "").strip() or None
+    user_id = verified_uid
     profile_id = (websocket.query_params.get("profile_id") or "").strip() or None
     effective_system_instruction = SYSTEM_INSTRUCTION
     profile_memory_loaded = False

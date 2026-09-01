@@ -6,8 +6,13 @@ class AppIdentityStore {
   static const String _userIdKey = 'neurodecode_user_id';
   static const String _activeProfileIdKey = 'neurodecode_active_profile_id';
   static const String _recentProfileIdsKey = 'neurodecode_recent_profile_ids';
+  static const String _legacyClaimStatusKey = 'neurodecode_legacy_claim_status';
   static const int _maxRecentProfiles = 12;
 
+  /// Legacy, pre-Firebase-Auth local identifier. Kept only so a device that
+  /// already has one can migrate its existing backend data to the new
+  /// verified Firebase uid once (see AuthIdentity.attemptLegacyClaimIfNeeded).
+  /// Not used for new backend calls — those are authenticated by ID token.
   Future<String> getOrCreateUserId() async {
     final prefs = await SharedPreferences.getInstance();
     final existing = prefs.getString(_userIdKey)?.trim();
@@ -18,6 +23,29 @@ class AppIdentityStore {
     final generated = _generateUserId();
     await prefs.setString(_userIdKey, generated);
     return generated;
+  }
+
+  /// Same as [getOrCreateUserId] but never fabricates a new id. A fresh
+  /// install has no legacy data, so returning null here (rather than
+  /// creating an id that was never real) is what lets the migration flow
+  /// tell "nothing to migrate" apart from "haven't tried yet".
+  Future<String?> readExistingUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = prefs.getString(_userIdKey)?.trim();
+    return (existing != null && existing.isNotEmpty) ? existing : null;
+  }
+
+  Future<String?> getLegacyClaimStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_legacyClaimStatusKey);
+  }
+
+  /// Persist a terminal claim-legacy outcome ('complete' | 'conflict' |
+  /// 'expired') only — never called for a transient failure, so a retry is
+  /// always attempted again on the next app launch until one of those lands.
+  Future<void> setLegacyClaimStatus(String status) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_legacyClaimStatusKey, status);
   }
 
   Future<String?> getActiveProfileId() async {
